@@ -10,6 +10,7 @@ keycloak/rice-research-realm.json
 keycloak/certs/
 __pycache__/
 *.py[cod]
+.venv/
 node_modules/
 dist/
 data/raw/

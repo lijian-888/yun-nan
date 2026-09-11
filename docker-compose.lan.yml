@@ -49,6 +49,12 @@ services:
       MIGRATION_DATABASE_URL: postgresql+psycopg://rice:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env.production}@db:5432/rice_demo
       APP_DATABASE_ROLE: rice_app
       APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?Set APP_DATABASE_PASSWORD in deploy/.env.production}
+      INSTITUTION_ID: ${INSTITUTION_ID:-yunnan-academy-agricultural-sciences}
+      INSTITUTION_CODE: ${INSTITUTION_CODE:-YNAAS}
+      INSTITUTION_NAME: ${INSTITUTION_NAME:-云南省农业科学院}
+      DEFAULT_PROJECT_CODE: ${DEFAULT_PROJECT_CODE:-YNAAS-DEFAULT}
+      DEFAULT_PROJECT_NAME: ${DEFAULT_PROJECT_NAME:-云南省农业科学院水稻育种研究}
+      DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-false}
       INSTITUTION_DATA_ENABLED: ${INSTITUTION_DATA_ENABLED:-true}
       INSTITUTION_UPLOAD_STAGING_DIR: /data/raw/institution-staging
       MINIO_ENDPOINT: minio:9000

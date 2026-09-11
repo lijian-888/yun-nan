@@ -2,7 +2,7 @@
   "realm": "rice-research",
   "enabled": true,
   "sslRequired": "EXTERNAL",
-  "displayName": "海南南繁 · 隆耘 Agent 育种智能体",
+  "displayName": "云南省农业科学院 · 隆耘 Agent 育种智能体",
   "loginTheme": "rice-research",
   "registrationAllowed": false,
   "loginWithEmailAllowed": false,
@@ -19,7 +19,7 @@
   "clients": [
     {
       "clientId": "rice-research-web",
-      "name": "Longyun Agent Breeding Intelligence Web",
+      "name": "YNAAS Longyun Agent Breeding Intelligence Web",
       "publicClient": true,
       "protocol": "openid-connect",
       "standardFlowEnabled": true,
@@ -31,41 +31,31 @@
   ],
   "users": [
     {
-      "username": "wang.researcher",
+      "username": "ynaas.researcher",
       "enabled": true,
-      "firstName": "Wang",
-      "lastName": "Researcher",
-      "email": "wang.researcher@example.local",
+      "firstName": "科研人员",
+      "lastName": "云南农科院",
+      "email": "ynaas.researcher@example.local",
       "emailVerified": true,
       "realmRoles": ["researcher"],
       "credentials": [{ "type": "password", "value": "${INITIAL_RESEARCHER_PASSWORD}", "temporary": true }]
     },
     {
-      "username": "li.researcher",
+      "username": "ynaas.processor",
       "enabled": true,
-      "firstName": "Li",
-      "lastName": "Researcher",
-      "email": "li.researcher@example.local",
-      "emailVerified": true,
-      "realmRoles": ["researcher"],
-      "credentials": [{ "type": "password", "value": "${INITIAL_RESEARCHER_PASSWORD}", "temporary": true }]
-    },
-    {
-      "username": "zhang.processor",
-      "enabled": true,
-      "firstName": "Zhang",
-      "lastName": "Processor",
-      "email": "zhang.processor@example.local",
+      "firstName": "数据处理员",
+      "lastName": "云南农科院",
+      "email": "ynaas.processor@example.local",
       "emailVerified": true,
       "realmRoles": ["data_processor"],
       "credentials": [{ "type": "password", "value": "${INITIAL_PROCESSOR_PASSWORD}", "temporary": true }]
     },
     {
-      "username": "chen.fieldadmin",
+      "username": "ynaas.fieldadmin",
       "enabled": true,
-      "firstName": "Chen",
-      "lastName": "FieldAdmin",
-      "email": "chen.fieldadmin@example.local",
+      "firstName": "字段管理员",
+      "lastName": "云南农科院",
+      "email": "ynaas.fieldadmin@example.local",
       "emailVerified": true,
       "realmRoles": ["field_admin"],
       "credentials": [{ "type": "password", "value": "${INITIAL_FIELD_ADMIN_PASSWORD}", "temporary": true }]

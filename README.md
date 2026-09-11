@@ -1,4 +1,4 @@
-# 隆耘 Agent 育种智能体
+# 隆耘 Agent 育种智能体（云南省农业科学院）
 
 ## 部署模式
 
@@ -39,11 +39,21 @@ docker compose down
 Copy-Item keycloak/rice-research-realm.json.example keycloak/rice-research-realm.json
 ```
 
-示例内预置两个研究人员账号 `wang.researcher`、`li.researcher`，以及数据处理员 `zhang.processor`、字段管理员 `chen.fieldadmin`。占位密码只能用于初始化，启动前必须替换；所有账号首次登录也应修改密码。研究人员共享“已发布标准数据”的只读查询能力，但会话、上传附件、解析文本和压缩上下文严格隔离。数据处理员不能修改标准模板；字段管理员不能导入、审核或发布业务数据。
+示例内预置科研人员 `ynaas.researcher`、数据处理员 `ynaas.processor`、字段管理员 `ynaas.fieldadmin` 三类账号。占位密码只能用于初始化，启动前必须分别替换；所有账号首次登录也应修改密码。科研人员具有“已发布标准数据”的只读查询能力，但会话、上传附件、解析文本和压缩上下文严格隔离。数据处理员不能修改标准模板；字段管理员不能导入、审核或发布业务数据。
 
 ## 机构与课题边界
 
-海南南繁仍是默认机构，用户不需要创建、选择或切换机构。机构归属由受控的账号目录预先配置，登录时不会被请求参数或页面表单改写；每个账号只能进入所属机构及其有权课题。数据接入层会为每个已配置机构自动建立私有 MinIO Bucket 和独立 PostgreSQL 业务数据库，并在数据记录中继续保留 `institution_id`、`project_id` 和实体标识。实现和验收说明见 [机构级数据导入实现说明](docs/R3-机构级数据导入实现说明.md)。
+云南省农业科学院是默认机构，用户不需要创建、选择或切换机构。机构归属由受控的账号目录预先配置，登录时不会被请求参数或页面表单改写；每个账号只能进入所属机构及其有权课题。数据接入层可为每个已配置机构建立私有 MinIO Bucket 和独立 PostgreSQL 业务数据库，并在数据记录中继续保留 `institution_id`、`project_id` 和实体标识。当前原生数据库共存初始化默认关闭该独立数据平面，避免在未配置 MinIO 时另建数据库。详见 [云南原生 PostgreSQL 初始化说明](docs/YUNNAN-BOOTSTRAP.md)。
+
+## 云南原生 PostgreSQL 初始化
+
+目标库已有 `core/governance/ingest/raw/ricedata/ncbi/ai` 等业务 schema 时，使用下列脚本把隆耘结构非破坏性创建到 `public`：
+
+```powershell
+.\scripts\bootstrap-yunnan.ps1
+```
+
+脚本从本机私密 JSON 文件读取数据库与应用角色凭据，不在命令行或输出中显示密码；执行前后逐表比较所有非 `public` 表的精确行数，并拒绝连接非 `ynaas_rice_ai` 数据库。默认只创建表、视图、索引、约束、RLS、云南机构/默认课题/三类账号目录、标准模板和知识分类，不导入历史海南/江西演示业务数据。只有明确需要隔离演示环境时才能显式使用 `-IncludeDemoData`。
 
 ## 神农配置
 
@@ -84,7 +94,7 @@ docker compose --profile warmup run --rm model-warmup
 - API 使用非超级用户 `rice_app` 连接 PostgreSQL；迁移与建表使用独立的 bootstrap 账号。
 - `research_session`、`research_message`、`research_attachment`、`research_audit`、`research_result` 同时按课题和登录账号启用并强制 PostgreSQL RLS。即使有人篡改会话 ID，也无法读取其他课题或其他研究人员的私有内容。
 - `knowledge_folder`、`knowledge_document`、`knowledge_chunk` 同样按课题启用并强制 PostgreSQL RLS。私有知识库只能由资料所有者访问；研究人员只能检索当前课题已发布的公共资料，字段管理员才可核验、发布和撤回公共资料。
-- 品种、表型、原始来源、区域试验、GWAS、基因型资产、知识、任务和成果均带 `project_id`；历史数据启动时自动归入海南南繁默认课题。
+- 品种、表型、原始来源、区域试验、GWAS、基因型资产、知识、任务和成果均带 `project_id`；新数据归入云南省农业科学院有权课题。
 - 六类统一导入的原始文件进入所属机构私有 MinIO Bucket，结构化实体和关联进入所属机构独立业务数据库；API 仍按账号机构和当前课题双重校验。
 - 私有附件存入本地 Docker 卷，不提供对浏览器的直接文件路径访问；删除会话会一并删除附件、解析文本和压缩上下文。
 

@@ -29,7 +29,7 @@ function AppRouter() {
         setActiveProjectId(context.active_project_id);
         setPlatformContext(context);
       } catch (error) {
-        setContextError(error.message || "无法进入海南南繁工作环境。");
+        setContextError(error.message || "无法进入云南省农业科学院工作环境。");
       }
     })();
   }, []);
@@ -49,7 +49,7 @@ function AppRouter() {
   }
 
   if (contextError) return <main className="auth-error">{contextError}</main>;
-  if (!platformContext) return <main className="auth-error">正在进入海南南繁工作环境…</main>;
+  if (!platformContext) return <main className="auth-error">正在进入云南省农业科学院工作环境…</main>;
 
   let page = <main className="auth-error">当前账号未配置三类业务角色，请联系字段管理员。</main>;
   const workspaceKey = `${roles.join(",")}:${platformContext.active_project_id}`;

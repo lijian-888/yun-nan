@@ -141,9 +141,10 @@ async def require_trial_demo_user(user: CurrentUser = Security(get_current_user)
 
 
 async def require_business_user(user: CurrentUser = Security(get_current_user)) -> CurrentUser:
-    """Allow only the three business roles used by the Hainan NanFan platform."""
+    """Allow only the three configured institutional business roles."""
     if not {"researcher", "data_processor", "field_admin"}.intersection(user.roles):
-        raise HTTPException(403, "当前账号未配置海南南繁平台业务角色。")
+        institution_name = os.getenv("INSTITUTION_NAME", "云南省农业科学院").strip()
+        raise HTTPException(403, f"当前账号未配置{institution_name}平台业务角色。")
     return user
 
 

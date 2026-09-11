@@ -228,16 +228,24 @@ TRUSTED_HOSTS = [
 RAW_STORAGE_DIR = Path(os.getenv("RAW_STORAGE_DIR", "./data/raw"))
 RESEARCH_STORAGE_DIR = Path(os.getenv("RESEARCH_STORAGE_DIR", "./data/research"))
 
-# 海南南繁 is the server-owned default institution. Accounts can be
-# pre-provisioned into another institution, but users never create, select, or
-# switch institutions from the browser or from an access-token claim.
-INSTITUTION_ID = "hainan-nanfan"
-INSTITUTION_CODE = "HNNF"
-INSTITUTION_NAME = "海南南繁"
-DEFAULT_PROJECT_ID = "00000000-0000-4000-8000-000000000001"
-DEFAULT_PROJECT_CODE = "HNNF-DEFAULT"
-DEFAULT_PROJECT_NAME = "海南南繁水稻育种研究"
+# This repository is deployed for the Yunnan Academy of Agricultural Sciences.
+# Keep the boundary configurable so a future controlled deployment can reuse the
+# same code without accepting institution or project identifiers from browsers.
+INSTITUTION_ID = os.getenv("INSTITUTION_ID", "yunnan-academy-agricultural-sciences").strip()
+INSTITUTION_CODE = os.getenv("INSTITUTION_CODE", "YNAAS").strip()
+INSTITUTION_NAME = os.getenv("INSTITUTION_NAME", "云南省农业科学院").strip()
+DEFAULT_PROJECT_ID = os.getenv("DEFAULT_PROJECT_ID", "00000000-0000-4000-8000-000000000001").strip()
+DEFAULT_PROJECT_CODE = os.getenv("DEFAULT_PROJECT_CODE", "YNAAS-DEFAULT").strip()
+DEFAULT_PROJECT_NAME = os.getenv("DEFAULT_PROJECT_NAME", "云南省农业科学院水稻育种研究").strip()
+DEFAULT_PLATFORM_ACCOUNTS = (
+    ("ynaas.researcher", "云南农科院研究员", "researcher"),
+    ("ynaas.processor", "云南农科院数据处理员", "data_processor"),
+    ("ynaas.fieldadmin", "云南农科院字段管理员", "field_admin"),
+)
 BUSINESS_ROLES = ("data_processor", "field_admin", "researcher")
+DEMO_DATA_ENABLED = os.getenv("DEMO_DATA_ENABLED", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 INSTITUTION_DATA_ENABLED = os.getenv("INSTITUTION_DATA_ENABLED", "false").strip().lower() in {
     "1", "true", "yes", "on",
 }
@@ -1104,7 +1112,7 @@ def _business_role(user: CurrentUser) -> str:
     for role in ("field_admin", "data_processor", "researcher"):
         if role in user.roles:
             return role
-    raise HTTPException(403, "当前账号未配置海南南繁平台业务角色。")
+    raise HTTPException(403, f"当前账号未配置{INSTITUTION_NAME}平台业务角色。")
 
 
 def sync_platform_account(session: Session, user: CurrentUser) -> PlatformAccount:
@@ -1127,7 +1135,7 @@ def sync_platform_account(session: Session, user: CurrentUser) -> PlatformAccoun
         account.business_role = role
         # Institution assignment is provisioned by the platform directory and
         # must not be overwritten on every login. New accounts still enter the
-        # default Hainan NanFan institution automatically.
+        # configured default institution automatically.
     account.last_login_at = datetime.now(timezone.utc)
     session.flush()
     if not account.active:
@@ -3040,7 +3048,7 @@ def normalize_legacy_range_markers(session: Session) -> None:
 
 
 def ensure_single_institution_schema(session: Session) -> None:
-    """Install the one-institution/project boundary and backfill legacy rows."""
+    """Install the configured one-institution/project boundary."""
     institution = session.get(Institution, INSTITUTION_ID)
     if not institution:
         session.add(Institution(
@@ -3050,13 +3058,7 @@ def ensure_single_institution_schema(session: Session) -> None:
             status="active",
         ))
 
-    default_accounts = (
-        ("wang.researcher", "王研究员", "researcher"),
-        ("li.researcher", "李研究员", "researcher"),
-        ("zhang.processor", "张数据处理员", "data_processor"),
-        ("chen.fieldadmin", "陈字段管理员", "field_admin"),
-    )
-    for username, display_name, role in default_accounts:
+    for username, display_name, role in DEFAULT_PLATFORM_ACCOUNTS:
         account = session.get(PlatformAccount, username)
         if not account:
             session.add(PlatformAccount(
@@ -3075,7 +3077,7 @@ def ensure_single_institution_schema(session: Session) -> None:
             id=DEFAULT_PROJECT_ID,
             project_code=DEFAULT_PROJECT_CODE,
             project_name=DEFAULT_PROJECT_NAME,
-            description="海南南繁统一默认课题；历史业务数据已自动归入此课题。",
+            description=f"{INSTITUTION_NAME}统一默认课题。",
             institution_id=INSTITUTION_ID,
             status="active",
             created_by="system-bootstrap",
@@ -3085,7 +3087,9 @@ def ensure_single_institution_schema(session: Session) -> None:
         project.institution_id = INSTITUTION_ID
     session.flush()
 
-    for username in ("wang.researcher", "li.researcher"):
+    for username, _, role in DEFAULT_PLATFORM_ACCOUNTS:
+        if role != "researcher":
+            continue
         membership = session.scalar(select(ProjectMember).where(
             ProjectMember.project_id == DEFAULT_PROJECT_ID,
             ProjectMember.username == username,
@@ -3193,8 +3197,20 @@ def institution_data_config_for_user(
     return account, config
 
 
-@app.on_event("startup")
-def startup() -> None:
+def initialize_database(
+    *,
+    include_demo_data: bool = False,
+    run_runtime_maintenance: bool = False,
+) -> None:
+    """Create/upgrade application schema without importing business demo rows.
+
+    System configuration (institution, default project, controlled templates,
+    public knowledge categories and the QC template) is always idempotently
+    installed. Hainan/Jiangxi sample varieties and simulated trial/dossier rows
+    are opt-in only so a real institutional database cannot receive them by
+    accident. Runtime repair steps that may update existing ``public`` rows are
+    also opt-in and are used by API startup, not by the schema-only CLI.
+    """
     validate_runtime_configuration()
     with MigrationSessionLocal() as session:
         ensure_application_database_role(session)
@@ -3205,12 +3221,13 @@ def startup() -> None:
             raise RuntimeError("PostgreSQL pgvector 扩展不可用，请使用包含 pgvector 的数据库镜像。") from exc
     Base.metadata.create_all(migration_engine)
     with MigrationSessionLocal() as session:
-        interrupted_ai_tasks = _fail_interrupted_ai_tasks(session)
-        if interrupted_ai_tasks:
-            logger.warning(
-                "Marked %s interrupted AI gateway tasks as explicitly failed during startup",
-                interrupted_ai_tasks,
-            )
+        if run_runtime_maintenance:
+            interrupted_ai_tasks = _fail_interrupted_ai_tasks(session)
+            if interrupted_ai_tasks:
+                logger.warning(
+                    "Marked %s interrupted AI gateway tasks as explicitly failed during startup",
+                    interrupted_ai_tasks,
+                )
         # Trial data remains separate from legacy variety-level records.  A
         # measurement is meaningful only together with trial, treatment,
         # replicate, environment and raw-source location.
@@ -3229,7 +3246,6 @@ def startup() -> None:
             "ON permission_audit(institution_id)"
         ))
         ensure_institution_data_planes(session)
-        retire_legacy_seeded_trial_demo(session)
         session.execute(text("ALTER TABLE source_review ADD COLUMN IF NOT EXISTS template_version_id VARCHAR(36)"))
         session.execute(text("ALTER TABLE research_session ADD COLUMN IF NOT EXISTS memory_state JSONB NOT NULL DEFAULT '{}'::jsonb"))
         session.execute(text("ALTER TABLE knowledge_document ADD COLUMN IF NOT EXISTS version_change_summary TEXT"))
@@ -3237,24 +3253,38 @@ def startup() -> None:
         session.execute(text("ALTER TABLE knowledge_document ADD COLUMN IF NOT EXISTS license_scope VARCHAR(100)"))
         session.execute(text("ALTER TABLE knowledge_document ADD COLUMN IF NOT EXISTS topic_tags JSONB NOT NULL DEFAULT '[]'::jsonb"))
         session.commit()
-        backfill_image_ready_research_attachments(session)
-        normalize_legacy_range_markers(session)
+        if run_runtime_maintenance:
+            backfill_image_ready_research_attachments(session)
+            normalize_legacy_range_markers(session)
         seed_templates(session)
-        seed_data(session)
-        # The dossier seed is intentionally dependent on the material table.
-        # It becomes active once the regional-trial package has been published.
-        seed_mock_breeding_dossiers(session)
-        backfill_missing_variety_basic_info(session)
-        # Demo defaults to retaining every import. Future deployments can enable
-        # request-level source de-duplication without changing the import flow.
-        session.execute(text("DROP INDEX IF EXISTS uq_source_review_file_hash"))
-        session.commit()
-        consolidate_duplicate_traits(session)
+        if include_demo_data:
+            seed_data(session)
+            # The dossier seed is intentionally dependent on the material table.
+            # It becomes active once the regional-trial package has been published.
+            seed_mock_breeding_dossiers(session)
+        if run_runtime_maintenance:
+            backfill_missing_variety_basic_info(session)
+        if include_demo_data:
+            retire_legacy_seeded_trial_demo(session)
+            # Demo defaults to retaining every import. Future deployments can enable
+            # request-level source de-duplication without changing the import flow.
+            session.execute(text("DROP INDEX IF EXISTS uq_source_review_file_hash"))
+            session.commit()
+        if run_runtime_maintenance:
+            consolidate_duplicate_traits(session)
         ensure_trait_uniqueness_constraints(session)
         ensure_research_rls(session)
         seed_public_knowledge_folders(session)
         ensure_knowledge_rls(session)
         ensure_application_database_role(session)
+
+
+@app.on_event("startup")
+def startup() -> None:
+    initialize_database(
+        include_demo_data=DEMO_DATA_ENABLED,
+        run_runtime_maintenance=True,
+    )
     resume_interrupted_knowledge_documents()
 
 
@@ -3913,7 +3943,7 @@ def update_project(
     if not project or project.institution_id != account.institution_id:
         raise HTTPException(404, "课题不存在。")
     if project.id == DEFAULT_PROJECT_ID and payload.status == "archived":
-        raise HTTPException(409, "海南南繁默认课题不能停用。")
+        raise HTTPException(409, f"{INSTITUTION_NAME}默认课题不能停用。")
     before = {"project_name": project.project_name, "description": project.description or "", "status": project.status}
     if payload.project_name is not None:
         project.project_name = payload.project_name.strip()

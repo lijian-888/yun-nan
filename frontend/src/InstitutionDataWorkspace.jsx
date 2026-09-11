@@ -121,7 +121,7 @@ export default function InstitutionDataWorkspace({ onNotice }) {
 
     <section className="panel institution-trace-panel">
       <div className="panel-title-row"><div><h3><FileSearch size={19} />按实体标识追溯</h3><p>仅查询当前机构和当前课题下的实体、关系、原始批次和异常。</p></div></div>
-      <form className="institution-trace-form" onSubmit={searchTrace}><input value={traceKey} onChange={(event) => setTraceKey(event.target.value)} placeholder="例如 HNNF-G001" /><button className="secondary-button" type="submit"><Link2 size={16} />查询关联</button></form>
+      <form className="institution-trace-form" onSubmit={searchTrace}><input value={traceKey} onChange={(event) => setTraceKey(event.target.value)} placeholder="例如 YNAAS-G001" /><button className="secondary-button" type="submit"><Link2 size={16} />查询关联</button></form>
       {trace && <div className="institution-trace-result"><div><strong>实体 {trace.entities.length}</strong>{trace.entities.map((item) => <code key={`${item.entity_type}-${item.entity_key}`}>{item.entity_type}:{item.entity_key}</code>)}</div><div><strong>关系 {trace.relations.length}</strong>{trace.relations.map((item, index) => <span key={`${item.relation_type}-${index}`}>{item.source_entity_key} —{item.relation_type}→ {item.target_entity_key} <em>{item.status}</em></span>)}</div><div><strong>问题 {trace.issues.filter((item) => !item.resolved).length} 个待处理 / {trace.issues.length} 个历史</strong>{trace.issues.map((item, index) => <span className={`trace-issue ${item.resolved ? "resolved" : ""}`} key={`${item.issue_type}-${index}`}><AlertTriangle size={14} />{item.resolved ? "已恢复：" : ""}{item.message}；受影响：{item.affected_features?.join("、")}</span>)}</div></div>}
     </section>
 
