@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$SecretPath = 'C:\Users\A\AppData\Roaming\postgresql\ynaas_native_pg_secrets.json',
+    [string]$SecretPath = (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'postgresql\ynaas_native_pg_secrets.json'),
     [string]$ExpectedDatabase = 'ynaas_rice_ai',
     [switch]$IncludeDemoData
 )
@@ -15,35 +15,64 @@ if (-not (Test-Path -LiteralPath $SecretPath)) {
     throw "PostgreSQL secret file not found: $SecretPath"
 }
 
-$secret = Get-Content -LiteralPath $SecretPath -Raw | ConvertFrom-Json
+$secret = Get-Content -LiteralPath $SecretPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $requiredProperties = @(
-    'host', 'port', 'database', 'postgres_user', 'postgres_password',
-    'app_user', 'ynaas_app_password'
+    'host', 'port', 'database', 'postgres_user', 'postgres_password'
 )
 foreach ($property in $requiredProperties) {
     if (-not $secret.PSObject.Properties[$property] -or -not [string]$secret.$property) {
         throw "PostgreSQL secret file is missing required property: $property"
     }
 }
+
+function New-DatabaseRoleSecret {
+    $bytes = New-Object byte[] 30
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    }
+    finally {
+        $generator.Dispose()
+    }
+    $base = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    return "${base}!aA1"
+}
+
+$secretUpdated = $false
+if (-not $secret.PSObject.Properties['longyun_app_user']) {
+    $secret | Add-Member -NotePropertyName 'longyun_app_user' -NotePropertyValue 'ynaas_longyun_api'
+    $secretUpdated = $true
+}
+if (-not $secret.PSObject.Properties['longyun_app_password'] -or -not [string]$secret.longyun_app_password) {
+    $secret | Add-Member -NotePropertyName 'longyun_app_password' -NotePropertyValue (New-DatabaseRoleSecret)
+    $secretUpdated = $true
+}
+if ($secretUpdated) {
+    [IO.File]::WriteAllText(
+        $SecretPath,
+        ($secret | ConvertTo-Json -Depth 4),
+        (New-Object Text.UTF8Encoding($false))
+    )
+}
 if ([string]$secret.database -ne $ExpectedDatabase) {
     throw "Refusing to initialize '$($secret.database)'; expected '$ExpectedDatabase'."
 }
-if ([string]$secret.app_user -notmatch '^[a-z_][a-z0-9_]{0,62}$') {
+if ([string]$secret.longyun_app_user -notmatch '^[a-z_][a-z0-9_]{0,62}$') {
     throw 'The application database role is not a safe PostgreSQL identifier.'
 }
 
 $databaseUser = [Uri]::EscapeDataString([string]$secret.postgres_user)
 $databasePassword = [Uri]::EscapeDataString([string]$secret.postgres_password)
-$applicationUser = [Uri]::EscapeDataString([string]$secret.app_user)
-$applicationPassword = [Uri]::EscapeDataString([string]$secret.ynaas_app_password)
+$applicationUser = [Uri]::EscapeDataString([string]$secret.longyun_app_user)
+$applicationPassword = [Uri]::EscapeDataString([string]$secret.longyun_app_password)
 $databaseName = [Uri]::EscapeDataString([string]$secret.database)
 $migrationDatabaseUrl = "postgresql+psycopg://${databaseUser}:${databasePassword}@$($secret.host):$($secret.port)/${databaseName}"
 $applicationDatabaseUrl = "postgresql+psycopg://${applicationUser}:${applicationPassword}@$($secret.host):$($secret.port)/${databaseName}"
 $environment = @{
     DATABASE_URL = $applicationDatabaseUrl
     MIGRATION_DATABASE_URL = $migrationDatabaseUrl
-    APP_DATABASE_ROLE = [string]$secret.app_user
-    APP_DATABASE_PASSWORD = [string]$secret.ynaas_app_password
+    APP_DATABASE_ROLE = [string]$secret.longyun_app_user
+    APP_DATABASE_PASSWORD = [string]$secret.longyun_app_password
     INSTITUTION_ID = 'yunnan-academy-agricultural-sciences'
     INSTITUTION_CODE = 'YNAAS'
     INSTITUTION_NAME = '云南省农业科学院'

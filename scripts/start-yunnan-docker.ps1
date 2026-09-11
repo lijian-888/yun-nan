@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$DatabaseSecretPath = 'C:\Users\A\AppData\Roaming\postgresql\ynaas_native_pg_secrets.json',
-    [string]$RuntimeSecretPath = 'C:\Users\A\AppData\Roaming\longyun-yunnan\runtime-secrets.json',
+    [string]$DatabaseSecretPath = (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'postgresql\ynaas_native_pg_secrets.json'),
+    [string]$RuntimeSecretPath = (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'longyun-yunnan\runtime-secrets.json'),
     [switch]$NoBuild
 )
 
@@ -16,14 +16,21 @@ if ($LASTEXITCODE -ne 0) {
 & (Join-Path $PSScriptRoot 'prepare-yunnan-runtime.ps1') -RuntimeSecretPath $RuntimeSecretPath
 & (Join-Path $PSScriptRoot 'bootstrap-yunnan.ps1') -SecretPath $DatabaseSecretPath
 
-$database = Get-Content -LiteralPath $DatabaseSecretPath -Raw | ConvertFrom-Json
-$runtime = Get-Content -LiteralPath $RuntimeSecretPath -Raw | ConvertFrom-Json
+$database = Get-Content -LiteralPath $DatabaseSecretPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$runtime = Get-Content -LiteralPath $RuntimeSecretPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([string]$database.database -ne 'ynaas_rice_ai') {
     throw "Refusing Docker startup for database '$($database.database)'."
 }
+$yunnanApiKey = ([string]$env:YUNNAN_API_KEY).Trim()
+if (-not $yunnanApiKey -and $runtime.PSObject.Properties['yunnan_api_key']) {
+    $yunnanApiKey = ([string]$runtime.yunnan_api_key).Trim()
+}
+if (-not $yunnanApiKey) {
+    throw "YUNNAN_API_KEY is not configured. Run scripts\set-yunnan-api-key.ps1 first."
+}
 
-$applicationUser = [Uri]::EscapeDataString([string]$database.app_user)
-$applicationPassword = [Uri]::EscapeDataString([string]$database.ynaas_app_password)
+$applicationUser = [Uri]::EscapeDataString([string]$database.longyun_app_user)
+$applicationPassword = [Uri]::EscapeDataString([string]$database.longyun_app_password)
 $migrationUser = [Uri]::EscapeDataString([string]$database.postgres_user)
 $migrationPassword = [Uri]::EscapeDataString([string]$database.postgres_password)
 $databaseName = [Uri]::EscapeDataString([string]$database.database)
@@ -33,13 +40,17 @@ $migrationUrl = "postgresql+psycopg://${migrationUser}:${migrationPassword}@host
 $environment = @{
     YUNNAN_DATABASE_URL = $applicationUrl
     YUNNAN_MIGRATION_DATABASE_URL = $migrationUrl
-    YUNNAN_APP_DATABASE_ROLE = [string]$database.app_user
-    YUNNAN_APP_DATABASE_PASSWORD = [string]$database.ynaas_app_password
-    APP_DATABASE_PASSWORD = [string]$database.ynaas_app_password
+    YUNNAN_APP_DATABASE_ROLE = [string]$database.longyun_app_user
+    YUNNAN_APP_DATABASE_PASSWORD = [string]$database.longyun_app_password
+    APP_DATABASE_PASSWORD = [string]$database.longyun_app_password
     MINIO_ROOT_USER = [string]$runtime.minio_root_user
     MINIO_ROOT_PASSWORD = [string]$runtime.minio_root_password
     KEYCLOAK_ADMIN_PASSWORD = [string]$runtime.keycloak_admin_password
     KEYCLOAK_HTTPS_KEYSTORE_PASSWORD = [string]$runtime.keycloak_keystore_password
+    AI_PROVIDER = 'cherryin'
+    YUNNAN_API_BASE_URL = 'https://open.cherryin.net/v1'
+    YUNNAN_MODEL = 'agent/deepseek-v4-flash'
+    YUNNAN_API_KEY = $yunnanApiKey
 }
 $previous = @{}
 foreach ($name in $environment.Keys) {

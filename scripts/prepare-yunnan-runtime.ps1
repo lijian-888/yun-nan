@@ -1,25 +1,37 @@
 [CmdletBinding()]
 param(
-    [string]$RuntimeSecretPath = 'C:\Users\A\AppData\Roaming\longyun-yunnan\runtime-secrets.json'
+    [string]$RuntimeSecretPath = (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'longyun-yunnan\runtime-secrets.json'),
+    [string]$RealmImportPath = '',
+    [string]$CertificatePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $realmTemplatePath = Join-Path $repositoryRoot 'keycloak\rice-research-realm.json.example'
-$realmImportPath = Join-Path $repositoryRoot 'keycloak\rice-research-realm.json'
-$certificateDirectory = Join-Path $repositoryRoot 'keycloak\certs'
-$certificatePath = Join-Path $certificateDirectory 'local-keycloak.pfx'
+if (-not $RealmImportPath) {
+    $RealmImportPath = Join-Path $repositoryRoot 'keycloak\rice-research-realm.json'
+}
+if (-not $CertificatePath) {
+    $CertificatePath = Join-Path $repositoryRoot 'keycloak\certs\local-keycloak.pfx'
+}
+$certificateDirectory = Split-Path -Parent $CertificatePath
 
 function New-RuntimeSecret {
-    $bytes = [byte[]]::new(30)
-    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $bytes = New-Object byte[] 30
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    }
+    finally {
+        $generator.Dispose()
+    }
     $base = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
     return "${base}!aA1"
 }
 
 $createdSecrets = $false
 if (Test-Path -LiteralPath $RuntimeSecretPath) {
-    $runtime = Get-Content -LiteralPath $RuntimeSecretPath -Raw | ConvertFrom-Json
+    $runtime = Get-Content -LiteralPath $RuntimeSecretPath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 else {
     $runtimeDirectory = Split-Path -Parent $RuntimeSecretPath
@@ -32,14 +44,28 @@ else {
         initial_field_admin_password = New-RuntimeSecret
         minio_root_user = 'ynaas-minio'
         minio_root_password = New-RuntimeSecret
+        yunnan_api_key = ''
     }
     $runtimeJson = $runtime | ConvertTo-Json -Depth 4
     [IO.File]::WriteAllText(
         $RuntimeSecretPath,
         $runtimeJson,
-        [Text.UTF8Encoding]::new($false)
+        (New-Object Text.UTF8Encoding($false))
     )
     $createdSecrets = $true
+}
+
+$runtimeUpdated = $false
+if (-not $runtime.PSObject.Properties['yunnan_api_key']) {
+    $runtime | Add-Member -NotePropertyName 'yunnan_api_key' -NotePropertyValue ''
+    $runtimeUpdated = $true
+}
+if ($runtimeUpdated) {
+    [IO.File]::WriteAllText(
+        $RuntimeSecretPath,
+        ($runtime | ConvertTo-Json -Depth 4),
+        (New-Object Text.UTF8Encoding($false))
+    )
 }
 
 $requiredProperties = @(
@@ -53,7 +79,7 @@ foreach ($property in $requiredProperties) {
     }
 }
 
-$realm = Get-Content -LiteralPath $realmTemplatePath -Raw | ConvertFrom-Json
+$realm = Get-Content -LiteralPath $realmTemplatePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $passwordByUsername = @{
     'ynaas.researcher' = [string]$runtime.initial_researcher_password
     'ynaas.processor' = [string]$runtime.initial_processor_password
@@ -67,50 +93,33 @@ foreach ($user in $realm.users) {
 }
 $realmJson = $realm | ConvertTo-Json -Depth 20
 [IO.File]::WriteAllText(
-    $realmImportPath,
+    $RealmImportPath,
     $realmJson,
-    [Text.UTF8Encoding]::new($false)
+    (New-Object Text.UTF8Encoding($false))
 )
 
-if ($createdSecrets -or -not (Test-Path -LiteralPath $certificatePath)) {
+if ($createdSecrets -or -not (Test-Path -LiteralPath $CertificatePath)) {
     New-Item -ItemType Directory -Path $certificateDirectory -Force | Out-Null
-    $rsa = [Security.Cryptography.RSA]::Create(2048)
+    $certificate = New-SelfSignedCertificate `
+        -Subject 'CN=localhost' `
+        -DnsName @('localhost', '127.0.0.1') `
+        -CertStoreLocation 'Cert:\CurrentUser\My' `
+        -KeyAlgorithm RSA `
+        -KeyLength 2048 `
+        -HashAlgorithm SHA256 `
+        -KeyExportPolicy Exportable `
+        -NotAfter (Get-Date).AddDays(825)
     try {
-        $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
-            'CN=localhost',
-            $rsa,
-            [Security.Cryptography.HashAlgorithmName]::SHA256,
-            [Security.Cryptography.RSASignaturePadding]::Pkcs1
-        )
-        $san = [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
-        $san.AddDnsName('localhost')
-        $san.AddIpAddress([Net.IPAddress]::Parse('127.0.0.1'))
-        $request.CertificateExtensions.Add($san.Build())
-        $request.CertificateExtensions.Add(
-            [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $true)
-        )
-        $request.CertificateExtensions.Add(
-            [Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
-                [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,
-                $true
-            )
-        )
-        $notBefore = [DateTimeOffset]::UtcNow.AddMinutes(-5)
-        $notAfter = $notBefore.AddDays(825)
-        $certificate = $request.CreateSelfSigned($notBefore, $notAfter)
-        try {
-            $pfx = $certificate.Export(
-                [Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12,
-                [string]$runtime.keycloak_keystore_password
-            )
-            [IO.File]::WriteAllBytes($certificatePath, $pfx)
-        }
-        finally {
-            $certificate.Dispose()
-        }
+        $securePassword = ConvertTo-SecureString -String ([string]$runtime.keycloak_keystore_password) -AsPlainText -Force
+        Export-PfxCertificate -Cert $certificate -FilePath $CertificatePath -Password $securePassword -Force | Out-Null
     }
     finally {
-        $rsa.Dispose()
+        if ($certificate -and ([string]$certificate.Thumbprint -match '^[A-Fa-f0-9]{40}$')) {
+            $temporaryCertificatePath = "Cert:\CurrentUser\My\$($certificate.Thumbprint)"
+            if (Test-Path -LiteralPath $temporaryCertificatePath) {
+                Remove-Item -LiteralPath $temporaryCertificatePath -Force
+            }
+        }
     }
 }
 

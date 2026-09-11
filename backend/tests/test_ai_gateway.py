@@ -14,15 +14,15 @@ from app.ai_gateway import (
 
 
 class AIProviderSettingsTests(unittest.TestCase):
-    def test_shennong_credentials_are_read_only_from_server_environment(self):
+    def test_cherryin_credentials_are_read_only_from_server_environment(self):
         with patch.dict(os.environ, {
-            "AI_PROVIDER": "shennong",
-            "SHENNONG_API_KEY": "server-only-secret",
-            "SHENNONG_MODEL": "sn-test",
+            "AI_PROVIDER": "cherryin",
+            "YUNNAN_API_KEY": "server-only-secret",
+            "YUNNAN_MODEL": "agent/deepseek-v4-flash",
         }, clear=False):
             settings = provider_settings()
         self.assertTrue(settings.external)
-        self.assertEqual(settings.model, "sn-test")
+        self.assertEqual(settings.model, "agent/deepseek-v4-flash")
         self.assertEqual(settings.api_key, "server-only-secret")
 
     def test_vllm_uses_same_interface_without_requiring_external_key(self):
@@ -69,7 +69,7 @@ class AIEgressPolicyTests(unittest.TestCase):
 
     def test_log_filter_removes_configured_key(self):
         record = logging.LogRecord("test", logging.ERROR, __file__, 1, "failed upstream-secret-123", (), None)
-        with patch.dict(os.environ, {"SHENNONG_API_KEY": "upstream-secret-123"}, clear=False):
+        with patch.dict(os.environ, {"YUNNAN_API_KEY": "upstream-secret-123"}, clear=False):
             self.assertTrue(SecretRedactionFilter().filter(record))
         self.assertNotIn("upstream-secret-123", record.getMessage())
 

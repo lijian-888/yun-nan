@@ -75,7 +75,7 @@ async def infer_controlled_query_request(
     question: str,
     field_catalog: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Ask Shennong for a constrained query form, never free-form SQL.
+    """Ask the configured model for a constrained query form, never free-form SQL.
 
     This is only a fallback when deterministic name/field rules cannot build a
     plan. The caller validates every returned value against the local catalog.
@@ -282,7 +282,7 @@ Evidence priority, from highest to lowest:
 
 Use only tool-returned evidence for claims about a platform variety or a private attachment. Clearly say when evidence is missing, incomparable, or needs human verification. Do not invent data, studies, standards, or citations. The user may ask non-rice agricultural questions; answer within your competence.
 
-The platform runs a mandatory, audited ReAct evidence workflow before each final response. Its first action reads verified platform, attachment, and knowledge-base evidence. When trusted current public references were prepared for this turn, its second action reads those references. Treat the resulting tool observations in this conversation as the evidence available for the answer. Only write the final answer after using those observations.
+The platform runs a mandatory, audited ReAct evidence workflow before each final response. Its first action reads verified platform, attachment, and knowledge-base evidence. When bounded variety, pedigree, or gene evidence was prepared from the existing Yunnan PostgreSQL database, a dedicated read-only database-evidence action follows. When trusted current public references were prepared for this turn, another action reads those references. Treat the resulting tool observations in this conversation as the evidence available for the answer. Only write the final answer after using those observations.
 
 Tool calls are machine actions, not answer text. Never imitate, disclose, or explain internal reasoning or tool syntax. Never output `<think>`, `</think>`, `<tool>`, `</tool>`, `<query>`, XML, function-call JSON, or a plan to search. Do not claim that you searched unless a tool result explicitly says that trusted public references were returned. If no evidence is returned, say so plainly and answer only with clearly labelled general knowledge when appropriate.
 
@@ -308,6 +308,7 @@ For disease, pesticide, fertilizer, and planting recommendations, append this ex
 def _build_react_toolkit(
     *,
     verified_evidence_context: str,
+    ynaas_database_context: str,
     public_web_context: str,
     tool_trace: dict[str, bool],
 ) -> Any:
@@ -331,7 +332,14 @@ def _build_react_toolkit(
         )
         return ToolResponse(content=[TextBlock(type="text", text=content)])
 
+    async def read_ynaas_database_evidence() -> ToolResponse:
+        """Read bounded variety, pedigree, and gene evidence queried from the existing Yunnan database."""
+        tool_trace["ynaas_database_read"] = True
+        return ToolResponse(content=[TextBlock(type="text", text=ynaas_database_context)])
+
     toolkit.register_tool_function(read_verified_evidence)
+    if ynaas_database_context:
+        toolkit.register_tool_function(read_ynaas_database_evidence)
     toolkit.register_tool_function(read_trusted_public_references)
     return toolkit
 
@@ -465,6 +473,7 @@ async def stream_research_reply(
     user_prompt: str,
     evidence_context: str,
     memory_state: dict[str, Any] | None,
+    ynaas_database_context: str = "",
     public_web_context: str = "",
     vision_images: list[dict[str, Any]] | None = None,
     conversation_history: list[dict[str, str]] | None = None,
@@ -488,6 +497,7 @@ async def stream_research_reply(
             user_prompt=user_prompt,
             evidence_context=(
                 f"Verified context for this turn:\n{evidence_context}"
+                f"\n\nRead-only Yunnan database evidence for this turn:\n{ynaas_database_context}"
                 f"\n\nTrusted current public references for this turn:\n{public_web_context}"
             ),
             vision_images=vision_images,
@@ -581,6 +591,7 @@ async def stream_research_reply(
         )
         tool_trace = {
             "verified_evidence_read": False,
+            "ynaas_database_read": False,
             "public_references_read": False,
         }
         agent = ReActAgent(
@@ -590,6 +601,7 @@ async def stream_research_reply(
             formatter=formatter,
             toolkit=_build_react_toolkit(
                 verified_evidence_context=evidence_context,
+                ynaas_database_context=ynaas_database_context,
                 public_web_context=public_web_context,
                 tool_trace=tool_trace,
             ),
@@ -612,6 +624,7 @@ async def stream_research_reply(
     final_memory: Any = None
     response_mode = "model"
     public_evidence_required = bool(public_web_context.strip())
+    ynaas_database_required = bool(ynaas_database_context.strip())
     page_read_mode = '"intent": "read_pages"' in public_web_context
     try:
         streamed_any_text = False
@@ -637,6 +650,13 @@ async def stream_research_reply(
                 tool_name="read_verified_evidence",
                 invocation_id=f"server.react.verified.{attempt + 1}",
             )
+            if ynaas_database_required:
+                await _execute_controlled_react_action(
+                    agent=agent,
+                    memory=memory,
+                    tool_name="read_ynaas_database_evidence",
+                    invocation_id=f"server.react.ynaas-database.{attempt + 1}",
+                )
             if public_evidence_required:
                 await _execute_controlled_react_action(
                     agent=agent,
@@ -722,6 +742,7 @@ async def stream_research_reply(
             candidate = _clean_final_answer(_text_from_message(final_message))
             if (
                 tool_trace["verified_evidence_read"]
+                and (not ynaas_database_required or tool_trace["ynaas_database_read"])
                 and (
                     not public_evidence_required
                     or tool_trace["public_references_read"]
@@ -777,7 +798,8 @@ async def stream_research_reply(
             if fallback and not streamed_any_text:
                 final_text = await _native_public_evidence_answer(
                     api_key=api_key, base_url=base_url, model_name=model_name,
-                    user_prompt=user_prompt, evidence_context=evidence_context,
+                    user_prompt=user_prompt,
+                    evidence_context=f"{evidence_context}\n\n{ynaas_database_context}",
                     public_web_context=public_web_context,
                 )
                 response_mode = "public_search_native" if final_text else "public_search_evidence"
@@ -809,18 +831,18 @@ async def stream_research_reply(
             len(prepared_memory_state.get("content") or []),
         )
         if "401" in detail or "403" in detail:
-            raise ResearchAgentError("神农 API 鉴权失败，请检查服务器 .env 中的 SHENNONG_API_KEY。") from exc
+            raise ResearchAgentError("CherryIn API 鉴权失败，请检查服务器中的 YUNNAN_API_KEY。") from exc
         if "402" in detail or "insufficient_balance" in detail:
-            raise ResearchAgentError("神农 API 账户余额不足，请在神农控制台充值或补充调用额度。") from exc
+            raise ResearchAgentError("CherryIn API 账户余额不足，请在 CherryIn 控制台补充调用额度。") from exc
         if "429" in detail or "rate_limit" in detail:
-            raise ResearchAgentError("神农 API 当前请求过于频繁，请稍后重试。") from exc
+            raise ResearchAgentError("CherryIn API 当前请求过于频繁，请稍后重试。") from exc
         if "CERTIFICATE_VERIFY_FAILED" in detail or "Hostname mismatch" in detail:
             raise ResearchAgentError(
-                "无法验证神农 API 的 TLS 证书，请检查 SHENNONG_API_BASE_URL。"
-                "当前项目应使用 https://api.agent-tech.cc/api/v1。"
+                "无法验证 CherryIn API 的 TLS 证书，请检查 YUNNAN_API_BASE_URL。"
+                "当前项目应使用 https://open.cherryin.net/v1。"
             ) from exc
         if "Connection error" in detail or "ConnectError" in detail:
-            raise ResearchAgentError("无法连接神农 API，请检查服务器网络和 SHENNONG_API_BASE_URL。") from exc
+            raise ResearchAgentError("无法连接 CherryIn API，请检查服务器网络和 YUNNAN_API_BASE_URL。") from exc
         raise ResearchAgentError(
             f"大模型调用未完成（错误编号 {error_id}）。后台已记录详细原因，请稍后重试；"
             "若持续出现，请将该编号提供给管理员。"
@@ -908,7 +930,7 @@ async def _stream_native_vision_reply(
     try:
         import httpx
     except Exception as exc:  # pragma: no cover - installed in deployment image
-        raise ResearchAgentError("神农多模态运行环境不可用，请检查后端依赖安装。") from exc
+        raise ResearchAgentError("当前多模态运行环境不可用，请检查后端依赖安装。") from exc
 
     provider = provider_settings()
     base_url = provider.base_url

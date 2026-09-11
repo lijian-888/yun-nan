@@ -26,7 +26,7 @@ class AIEgressBlockedError(RuntimeError):
 
 @dataclass(frozen=True)
 class AIProviderSettings:
-    provider: Literal["shennong", "vllm"]
+    provider: Literal["cherryin", "vllm"]
     base_url: str
     model: str
     api_key: str
@@ -66,13 +66,13 @@ class AIGatewayConcurrencyGate:
 
 def provider_settings(*, require_key: bool = True) -> AIProviderSettings:
     """Resolve one OpenAI-compatible provider using server environment only."""
-    provider = (os.getenv("AI_PROVIDER") or "shennong").strip().lower()
-    if provider == "shennong":
+    provider = (os.getenv("AI_PROVIDER") or "cherryin").strip().lower()
+    if provider == "cherryin":
         settings = AIProviderSettings(
-            provider="shennong",
-            base_url=(os.getenv("SHENNONG_API_BASE_URL") or "https://api.agent-tech.cc/api/v1").rstrip("/"),
-            model=(os.getenv("SHENNONG_MODEL") or "sn").strip() or "sn",
-            api_key=(os.getenv("SHENNONG_API_KEY") or "").strip(),
+            provider="cherryin",
+            base_url=(os.getenv("YUNNAN_API_BASE_URL") or "https://open.cherryin.net/v1").rstrip("/"),
+            model=(os.getenv("YUNNAN_MODEL") or "agent/deepseek-v4-flash").strip() or "agent/deepseek-v4-flash",
+            api_key=(os.getenv("YUNNAN_API_KEY") or "").strip(),
             external=True,
         )
     elif provider == "vllm":
@@ -86,7 +86,7 @@ def provider_settings(*, require_key: bool = True) -> AIProviderSettings:
             external=False,
         )
     else:
-        raise AIGatewayConfigurationError("AI_PROVIDER 仅支持 shennong 或 vllm。")
+        raise AIGatewayConfigurationError("AI_PROVIDER 仅支持 cherryin 或 vllm。")
     if require_key and settings.external and not settings.api_key:
         raise AIGatewayConfigurationError("尚未在服务器配置大模型 API Key。")
     return settings
@@ -164,7 +164,7 @@ def redact_secrets(value: object) -> str:
     """Return a log-safe rendering without leaking configured credentials."""
     rendered = str(value)
     for secret in (
-        (os.getenv("SHENNONG_API_KEY") or "").strip(),
+        (os.getenv("YUNNAN_API_KEY") or "").strip(),
         (os.getenv("VLLM_API_KEY") or "").strip(),
         (os.getenv("TAVILY_API_KEY") or "").strip(),
         (os.getenv("MINIO_SECRET_KEY") or "").strip(),

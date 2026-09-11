@@ -23,7 +23,10 @@
 默认配置：
 
 ```dotenv
-AI_PROVIDER=shennong
+AI_PROVIDER=cherryin
+YUNNAN_API_BASE_URL=https://open.cherryin.net/v1
+YUNNAN_MODEL=agent/deepseek-v4-flash
+YUNNAN_API_KEY=
 AI_TASK_TIMEOUT_SECONDS=180
 AI_TASK_QUEUE_WAIT_SECONDS=300
 AI_TASK_MAX_ATTEMPTS=2
@@ -39,3 +42,7 @@ VLLM_API_KEY=
 ```
 
 切换前应先确认 vLLM 服务可从 API 容器访问；`VLLM_API_KEY` 仅在 vLLM 前置代理要求鉴权时填写。
+
+## 云南既有数据工具
+
+对品种、审定、系谱、基因和 GO 注释问题，后端先使用固定参数化 SQL 模板从既有 PostgreSQL 生成有界证据，再强制 ReAct 智能体读取专用数据库证据工具。模型无法提交 SQL，且 API 使用独立的 `ynaas_longyun_api` 角色；未在白名单中的序列、抓取任务和其他 schema 表不可读。

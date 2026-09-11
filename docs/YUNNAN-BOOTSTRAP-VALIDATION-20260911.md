@@ -29,13 +29,13 @@
 | RLS 策略 | 18 |
 | 应用角色缺少 DML 授权的 `public` 表 | 0 |
 
-应用角色 `ynaas_app` 已验证可登录，且为 `NOSUPERUSER / NOCREATEDB / NOCREATEROLE / NOREPLICATION / NOBYPASSRLS`。
+隆耘 API 使用的独立应用角色 `ynaas_longyun_api` 已验证可登录，且为 `NOSUPERUSER / NOCREATEDB / NOCREATEROLE / NOREPLICATION / NOBYPASSRLS`。指定的品种、系谱、基因和 NCBI 注释表可读，`ncbi.gene_sequence` 和抓取任务表不可读。
 
 必要系统配置为 1 个云南机构、1 个默认课题、3 个互斥业务账号、1 个科研人员课题成员关系、8 套模板及版本、6 个公共知识分类和 1 套水稻基因型 QC 模板。`variety_basic`、`phenotype_observation`、`trial_data_package`、`breeding_material`、`breeding_program` 均为 0 行，确认没有导入海南/江西演示业务数据。
 
 ## 代码与构建验证
 
-- 后端：82 个单元测试全部通过。
+- 后端：85 个单元测试全部通过。
 - Python 依赖：`pip check` 通过。
 - 前端：`npm ci` 完成，Vite 生产构建通过。
 - Compose：`docker compose config --quiet` 通过。
@@ -49,11 +49,14 @@
 - `http://localhost:8000/api/health`、`http://localhost:5183`、`http://localhost:5183/api/health`、`http://localhost:9000/minio/health/live` 和 Keycloak OIDC discovery 均返回 200；MinerU 与 MinIO 的容器健康状态均为 `healthy`，所有六项服务重启次数为 0。
 - Keycloak 日志确认 `rice-research` Realm 实际导入。管理 API 验证 3 个账号全部启用且分别只具有 `researcher`、`data_processor`、`field_admin` 角色；PKCE 登录挑战确认三组随机初始口令均有效并停留在强制修改密码页面，没有签发授权码。
 - 容器启动和迁移后再次逐表核对：80 张既有非 `public` 表仍为 5,348,593 行，变化表为 0；五张演示业务表仍全部为 0 行。
+- Windows PowerShell `5.1.26100.9444` 在全新临时目录中完成首次运行，成功生成运行时 JSON、Realm 和 PFX；随后使用 PowerShell 5.1 完成数据库初始化与六服务复用启动。
+- CherryIn `https://open.cherryin.net/v1` 的 `agent/deepseek-v4-flash` 真实 Chat Completions 请求成功；容器内真实智能体强制读取云南数据库工具后生成了非空、包含目标品种的回答。
+- 应用角色的固定模板查询实测返回 1 个目标品种、31 个系谱节点、2 条基因记录和 8 条 GO 注释。
 
 本轮没有执行 factory reset，也没有删除或覆盖任何既有 Docker 镜像、容器或卷。Keycloak 使用仅限本机开发的自签名 HTTPS 证书，首次浏览器访问需由用户确认本地证书；生产部署不能复用该证书或 `start-dev` 模式。
 
 ## 当前运行边界
 
-本地完整应用、鉴权、存储、文档解析和 ACPs Direct JSON-RPC 入口已经可运行。当前容器没有配置 `SHENNONG_API_KEY` 或本地 vLLM 凭据，因此需要真实模型回答时仍须在本机运行环境配置合法的模型服务凭据；不得提交到 Git。ACPs Group/Registry、RabbitMQ 与 mTLS 也未配置，不影响单机 Direct 模式。
+本地完整应用、鉴权、存储、文档解析和 ACPs Direct JSON-RPC 入口已经可运行。模型服务使用 CherryIn、`YUNNAN_API_KEY` 和 `agent/deepseek-v4-flash`，密钥仅保存在仓库外的本机运行时文件中。ACPs Group/Registry、RabbitMQ 与 mTLS 也未配置，不影响单机 Direct 模式。
 
-既有 `core/governance/ingest/raw/ricedata/ncbi/ai` 数据尚未接入隆耘查询层；其适配边界和后续映射项见 `YUNNAN-BOOTSTRAP.md`。
+既有品种、审定、系谱和基因/NCBI 注释已通过只读固定模板接入智能体；`core/governance/ingest/raw/ai` 等其他业务数据仍按 `YUNNAN-BOOTSTRAP.md` 中的边界后续适配。

@@ -144,6 +144,7 @@ from .ai_gateway import (
 )
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
 from .research_search import build_public_web_context, requested_public_pages, resolve_public_request, search_public_references
+from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
 from .breeding_dossier import (
     BreedingDossierError,
     build_breeding_report_context,
@@ -2856,7 +2857,7 @@ def serialize_research_attachment(item: ResearchAttachment, include_preview: boo
     if include_preview:
         text_preview = item.parsed_markdown or ""
         if item.parsing_status == "image_ready":
-            text_preview = "图片附件不进行本地 Docling 或 OCR 文字解析。提问时，原图会直接提交给神农进行多模态视觉分析。"
+            text_preview = "图片附件不进行本地 Docling 或 OCR 文字解析。提问时，原图会直接提交给已配置的云南模型服务进行多模态视觉分析。"
         result.update({
             "preview": text_preview[:60000],
             "preview_truncated": len(text_preview) > 60000,
@@ -2995,15 +2996,16 @@ def ensure_application_database_role(session: Session) -> None:
     if not exists:
         session.execute(text(
             f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
-            f"NOREPLICATION NOBYPASSRLS PASSWORD '{escaped_password}'"
+            f"NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD '{escaped_password}'"
         ))
     else:
-        session.execute(text(f"ALTER ROLE {role} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '{escaped_password}'"))
+        session.execute(text(f"ALTER ROLE {role} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD '{escaped_password}'"))
     session.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
     session.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}"))
     session.execute(text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}"))
     session.execute(text(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role}"))
     session.execute(text(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {role}"))
+    ensure_reference_read_access(session, role)
     session.commit()
 
 
@@ -3023,7 +3025,7 @@ def backfill_image_ready_research_attachments(session: Session) -> None:
             attachment.parsing_status = "image_ready"
             attachment.parsed_markdown = None
             attachment.parsed_metadata = {}
-            attachment.parser_warnings = ["图片不进行本地 Docling 或 OCR 文字解析；提问时将原图直接提交给神农进行多模态分析。"]
+            attachment.parser_warnings = ["图片不进行本地 Docling 或 OCR 文字解析；提问时将原图直接提交给已配置的云南模型服务进行多模态分析。"]
             changed = True
     if changed:
         session.commit()
@@ -6771,6 +6773,10 @@ async def research_chat_stream(
         audit_actor(user),
         research_session.project_id,
     )
+    ynaas_database_context, ynaas_database_cards = build_ynaas_database_evidence(
+        session,
+        payload.content,
+    )
     analysis_run_id = _trial_analysis_run_id_from_context(published_context)
     attachment_context, attachment_cards = build_attachment_evidence_context(context_attachments)
     knowledge_context, knowledge_cards = build_knowledge_evidence_context(
@@ -6792,12 +6798,12 @@ async def research_chat_stream(
         and (not existing_task or item.id != existing_task.request_message_id)
     ]
     static_evidence_context = f"{published_context}\n\n{breeding_context}\n\n{attachment_context}\n\n{knowledge_context}"
-    if len(static_evidence_context) > MAX_RESEARCH_CONTEXT_CHARS:
+    if len(f"{static_evidence_context}\n\n{ynaas_database_context}") > MAX_RESEARCH_CONTEXT_CHARS:
         raise HTTPException(
             413,
             "当前会话附件与证据材料过长，未向模型截断。请移除部分附件或拆分后再分析。",
         )
-    static_evidence = [*published_cards, *breeding_cards, *attachment_cards, *knowledge_cards, *vision_cards]
+    static_evidence = [*published_cards, *breeding_cards, *attachment_cards, *knowledge_cards, *ynaas_database_cards, *vision_cards]
     memory_state = research_session.memory_state or {}
     private_evidence_selected = bool(attachment_cards or vision_blocks) or any(
         card.get("type") == "private_knowledge" for card in knowledge_cards
@@ -6805,6 +6811,7 @@ async def research_chat_stream(
     raw_egress_texts = [
         payload.content.strip(),
         static_evidence_context,
+        ynaas_database_context,
         json.dumps(memory_state, ensure_ascii=False),
         *(item["content"] for item in conversation_history),
     ]
@@ -6848,7 +6855,7 @@ async def research_chat_stream(
         })
         session.commit()
         raise HTTPException(422, str(exc)) from exc
-    safe_user_prompt, safe_static_evidence_context, safe_memory_json, *safe_history_texts = egress.texts
+    safe_user_prompt, safe_static_evidence_context, safe_ynaas_database_context, safe_memory_json, *safe_history_texts = egress.texts
     try:
         safe_memory_state = json.loads(safe_memory_json) if safe_memory_json else {}
     except ValueError:
@@ -6954,6 +6961,7 @@ async def research_chat_stream(
                 "published_evidence_count": len(published_cards),
                 "breeding_dossier_evidence_count": len(breeding_cards),
                 "knowledge_evidence_count": len(knowledge_cards),
+                "ynaas_database_evidence_count": len(ynaas_database_cards),
                 "knowledge_scope": payload.knowledge_scope,
             },
         ))
@@ -7015,7 +7023,7 @@ async def research_chat_stream(
             if search_note:
                 yield sse_event("status", {"label": search_note})
 
-            if len(f"{evidence_context}\n\n{public_web_context}") > MAX_RESEARCH_CONTEXT_CHARS:
+            if len(f"{evidence_context}\n\n{safe_ynaas_database_context}\n\n{public_web_context}") > MAX_RESEARCH_CONTEXT_CHARS:
                 raise ResearchAgentError(
                     "当前会话附件、已发布数据与公开资料合计过长，未向模型截断。"
                     "请移除部分附件或拆分问题后重试。"
@@ -7040,6 +7048,7 @@ async def research_chat_stream(
                 lambda: stream_research_reply(
                     user_prompt=safe_user_prompt,
                     evidence_context=evidence_context,
+                    ynaas_database_context=safe_ynaas_database_context,
                     memory_state=working_memory_state,
                     public_web_context=public_web_context,
                     vision_images=vision_blocks,
@@ -7101,6 +7110,7 @@ async def research_chat_stream(
                             "ai_task_id": ai_task_id,
                             "evidence_count": len(evidence),
                             "knowledge_evidence_count": len(knowledge_cards),
+                            "ynaas_database_evidence_count": len(ynaas_database_cards),
                             "public_web_source_count": len(web_results),
                             "response_mode": result.get("response_mode", "model"),
                             "report_requested": report_requested,
@@ -7215,6 +7225,7 @@ async def research_chat_stream(
                         "ai_task_id": ai_task_id,
                         "evidence_count": len(evidence),
                         "knowledge_evidence_count": len(knowledge_cards),
+                        "ynaas_database_evidence_count": len(ynaas_database_cards),
                         "public_web_source_count": len(web_results),
                         "report_kind": "breeding_dossier" if breeding_report_requested else "research_report",
                         "model_output": "placeholder_or_empty",

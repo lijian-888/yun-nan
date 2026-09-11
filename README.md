@@ -58,16 +58,19 @@ Copy-Item keycloak/rice-research-realm.json.example keycloak/rice-research-realm
 Docker Desktop 可用后，执行云南专用完整运行入口：
 
 ```powershell
+.\scripts\set-yunnan-api-key.ps1
 .\scripts\start-yunnan-docker.ps1
 ```
 
 该入口先重新执行安全数据库初始化，再生成被 Git 忽略的 Keycloak Realm、三类账号随机初始密码和本地 HTTPS 证书，最后构建并启动 MinIO、MinerU、Keycloak、API、基因型 Worker 与 Web。`docker-compose.yunnan.yml` 明确禁用内部演示数据库，API 和 Worker 连接宿主机现有 `ynaas_rice_ai`；运行口令保存在仓库外的本机私密文件中，不会显示或提交。
 
-启动后访问 `http://localhost:5183`，Keycloak 为 `https://localhost:8443`。本地证书为自签名证书，首次浏览器访问需人工确认；三类账号会强制首次修改密码。若要让智能体返回真实模型答案，还需在本机配置 `SHENNONG_API_KEY`，或把 AI Provider 指向可用的本地 vLLM，模型凭据不得提交。
+启动后访问 `http://localhost:5183`，Keycloak 为 `https://localhost:8443`。本地证书为自签名证书，首次浏览器访问需人工确认；三类账号会强制首次修改密码。若要让智能体返回真实模型答案，还需在本机配置 `YUNNAN_API_KEY`，或把 AI Provider 指向可用的本地 vLLM，模型凭据不得提交。
 
-## 神农配置
+## 云南 CherryIn 配置
 
-将 `.env.example` 复制为 `.env`，仅在服务器本地填写 `SHENNONG_API_KEY`，不要写进前端代码或提交到版本库。未配置 Key 时，科研助手仍可登录、管理私有会话与附件，但发起模型分析会明确提示缺少服务端配置。
+运行 `scripts\set-yunnan-api-key.ps1` 隐藏录入 `YUNNAN_API_KEY`。密钥只保存在当前 Windows 用户的外部运行时密钥文件中，不要写进前端代码或提交到版本库。默认通过 CherryIn 调用 `agent/deepseek-v4-flash`。
+
+智能体使用受控只读工具查询现有 PostgreSQL 中的品种、审定、系谱、基因别名、NCBI 注释和 GO 注释。工具只执行固定参数化模板，不接受模型生成的 SQL，并对结果数量和系谱深度设置上限。
 
 ## 可信公开资料检索
 
@@ -89,7 +92,7 @@ Docling、PaddleOCR 与 `bge-m3` 均在 API 容器本地运行。首次部署仍
 docker compose --profile warmup run --rm model-warmup
 ```
 
-预热后的模型缓存保存在本地 Docker 卷 `model_data`。确认预热成功后，可在农科院内网环境关闭容器对外网的访问；常规 PDF、Office 文档和扫描件解析会读取本地缓存，不会把附件上传给第三方服务。`bge-m3` 只对通过本地解析合格的知识库文本生成 1024 维向量，不会在用户请求中临时下载模型。图片附件不使用 Docling 或 PaddleOCR 进行本地文字解析，提问时会将原图发送给已配置的神农多模态服务进行视觉分析，因此正式部署时应纳入图片数据外发策略。
+预热后的模型缓存保存在本地 Docker 卷 `model_data`。确认预热成功后，可在农科院内网环境关闭容器对外网的访问；常规 PDF、Office 文档和扫描件解析会读取本地缓存，不会把附件上传给第三方服务。`bge-m3` 只对通过本地解析合格的知识库文本生成 1024 维向量，不会在用户请求中临时下载模型。图片附件不使用 Docling 或 PaddleOCR 进行本地文字解析，提问时会将原图发送给已配置的 CherryIn 多模态服务进行视觉分析，因此正式部署时应纳入图片数据外发策略。
 
 ## 个人与公共知识库
 

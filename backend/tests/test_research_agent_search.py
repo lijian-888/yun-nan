@@ -71,7 +71,7 @@ class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
             module = types.ModuleType(name)
             module.__dict__.update(values)
             modules[name] = module
-        with patch.dict(sys.modules, modules), patch.dict(os.environ, {"SHENNONG_API_KEY": "test"}), patch.object(agent, "_build_react_toolkit", side_effect=toolkit), patch.object(agent, "_execute_controlled_react_action", new=AsyncMock()), patch.object(agent, "_native_public_evidence_answer", new=AsyncMock(return_value=native_answer)):
+        with patch.dict(sys.modules, modules), patch.dict(os.environ, {"YUNNAN_API_KEY": "test"}), patch.object(agent, "_build_react_toolkit", side_effect=toolkit), patch.object(agent, "_execute_controlled_react_action", new=AsyncMock()), patch.object(agent, "_native_public_evidence_answer", new=AsyncMock(return_value=native_answer)):
             return [event async for event in agent.stream_research_reply(user_prompt="找到赣晚籼35号", evidence_context="", memory_state={}, public_web_context=context)]
 
     async def test_empty_provider_preserves_sources_and_clean_memory(self):
