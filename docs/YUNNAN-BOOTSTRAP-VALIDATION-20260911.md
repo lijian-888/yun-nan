@@ -41,8 +41,19 @@
 - Compose：`docker compose config --quiet` 通过。
 - Keycloak Realm：本地和生产两份 JSON 模板均通过 JSON 解析，包含 `rice-research-web` Client 与 `ynaas.researcher`、`ynaas.processor`、`ynaas.fieldadmin` 三类账号。
 
-## 尚未执行
+## Docker 完整运行验证
 
-Docker 客户端可用，但 Docker Desktop Linux Engine 服务端管道不存在，因此没有启动 Keycloak，也没有实际导入 Realm 或执行网页登录验收。本轮未执行 factory reset，未删除或修改任何 Docker 镜像、容器、卷。
+- Docker Desktop 4.80.0、Linux Engine 29.6.1 和 Docker Compose 5.1.4 已恢复可用。
+- 云南覆盖配置完成 API、基因型 Worker、MinerU、MinIO、Keycloak 和 Web 的首次构建与启动；随后使用 `start-yunnan-docker.ps1 -NoBuild` 再次执行，六项服务全部复用原镜像、卷、Realm、证书和口令并保持运行。
+- `ynaas-longyun-db` 容器不存在。API 与 Worker 的运行环境均指向 `host.docker.internal:5432/ynaas_rice_ai`，不包含 `rice_demo` 或 `@db:5432` 引用。
+- `http://localhost:8000/api/health`、`http://localhost:5183`、`http://localhost:5183/api/health`、`http://localhost:9000/minio/health/live` 和 Keycloak OIDC discovery 均返回 200；MinerU 与 MinIO 的容器健康状态均为 `healthy`，所有六项服务重启次数为 0。
+- Keycloak 日志确认 `rice-research` Realm 实际导入。管理 API 验证 3 个账号全部启用且分别只具有 `researcher`、`data_processor`、`field_admin` 角色；PKCE 登录挑战确认三组随机初始口令均有效并停留在强制修改密码页面，没有签发授权码。
+- 容器启动和迁移后再次逐表核对：80 张既有非 `public` 表仍为 5,348,593 行，变化表为 0；五张演示业务表仍全部为 0 行。
+
+本轮没有执行 factory reset，也没有删除或覆盖任何既有 Docker 镜像、容器或卷。Keycloak 使用仅限本机开发的自签名 HTTPS 证书，首次浏览器访问需由用户确认本地证书；生产部署不能复用该证书或 `start-dev` 模式。
+
+## 当前运行边界
+
+本地完整应用、鉴权、存储、文档解析和 ACPs Direct JSON-RPC 入口已经可运行。当前容器没有配置 `SHENNONG_API_KEY` 或本地 vLLM 凭据，因此需要真实模型回答时仍须在本机运行环境配置合法的模型服务凭据；不得提交到 Git。ACPs Group/Registry、RabbitMQ 与 mTLS 也未配置，不影响单机 Direct 模式。
 
 既有 `core/governance/ingest/raw/ricedata/ncbi/ai` 数据尚未接入隆耘查询层；其适配边界和后续映射项见 `YUNNAN-BOOTSTRAP.md`。

@@ -55,6 +55,16 @@ Copy-Item keycloak/rice-research-realm.json.example keycloak/rice-research-realm
 
 脚本从本机私密 JSON 文件读取数据库与应用角色凭据，不在命令行或输出中显示密码；执行前后逐表比较所有非 `public` 表的精确行数，并拒绝连接非 `ynaas_rice_ai` 数据库。默认只创建表、视图、索引、约束、RLS、云南机构/默认课题/三类账号目录、标准模板和知识分类，不导入历史海南/江西演示业务数据。只有明确需要隔离演示环境时才能显式使用 `-IncludeDemoData`。
 
+Docker Desktop 可用后，执行云南专用完整运行入口：
+
+```powershell
+.\scripts\start-yunnan-docker.ps1
+```
+
+该入口先重新执行安全数据库初始化，再生成被 Git 忽略的 Keycloak Realm、三类账号随机初始密码和本地 HTTPS 证书，最后构建并启动 MinIO、MinerU、Keycloak、API、基因型 Worker 与 Web。`docker-compose.yunnan.yml` 明确禁用内部演示数据库，API 和 Worker 连接宿主机现有 `ynaas_rice_ai`；运行口令保存在仓库外的本机私密文件中，不会显示或提交。
+
+启动后访问 `http://localhost:5183`，Keycloak 为 `https://localhost:8443`。本地证书为自签名证书，首次浏览器访问需人工确认；三类账号会强制首次修改密码。若要让智能体返回真实模型答案，还需在本机配置 `SHENNONG_API_KEY`，或把 AI Provider 指向可用的本地 vLLM，模型凭据不得提交。
+
 ## 神农配置
 
 将 `.env.example` 复制为 `.env`，仅在服务器本地填写 `SHENNONG_API_KEY`，不要写进前端代码或提交到版本库。未配置 Key 时，科研助手仍可登录、管理私有会话与附件，但发起模型分析会明确提示缺少服务端配置。

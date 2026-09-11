@@ -59,7 +59,8 @@
           "value": "CHANGE_ME_RESEARCHER_BEFORE_USE",
           "temporary": true
         }
-      ]
+      ],
+      "requiredActions": ["UPDATE_PASSWORD"]
     },
     {
       "username": "ynaas.processor",
@@ -77,7 +78,8 @@
           "value": "CHANGE_ME_PROCESSOR_BEFORE_USE",
           "temporary": true
         }
-      ]
+      ],
+      "requiredActions": ["UPDATE_PASSWORD"]
     },
     {
       "username": "ynaas.fieldadmin",
@@ -95,7 +97,8 @@
           "value": "CHANGE_ME_FIELD_ADMIN_BEFORE_USE",
           "temporary": true
         }
-      ]
+      ],
+      "requiredActions": ["UPDATE_PASSWORD"]
     }
   ]
 }

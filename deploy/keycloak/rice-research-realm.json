@@ -38,7 +38,8 @@
       "email": "ynaas.researcher@example.local",
       "emailVerified": true,
       "realmRoles": ["researcher"],
-      "credentials": [{ "type": "password", "value": "${INITIAL_RESEARCHER_PASSWORD}", "temporary": true }]
+      "credentials": [{ "type": "password", "value": "${INITIAL_RESEARCHER_PASSWORD}", "temporary": true }],
+      "requiredActions": ["UPDATE_PASSWORD"]
     },
     {
       "username": "ynaas.processor",
@@ -48,7 +49,8 @@
       "email": "ynaas.processor@example.local",
       "emailVerified": true,
       "realmRoles": ["data_processor"],
-      "credentials": [{ "type": "password", "value": "${INITIAL_PROCESSOR_PASSWORD}", "temporary": true }]
+      "credentials": [{ "type": "password", "value": "${INITIAL_PROCESSOR_PASSWORD}", "temporary": true }],
+      "requiredActions": ["UPDATE_PASSWORD"]
     },
     {
       "username": "ynaas.fieldadmin",
@@ -58,7 +60,8 @@
       "email": "ynaas.fieldadmin@example.local",
       "emailVerified": true,
       "realmRoles": ["field_admin"],
-      "credentials": [{ "type": "password", "value": "${INITIAL_FIELD_ADMIN_PASSWORD}", "temporary": true }]
+      "credentials": [{ "type": "password", "value": "${INITIAL_FIELD_ADMIN_PASSWORD}", "temporary": true }],
+      "requiredActions": ["UPDATE_PASSWORD"]
     }
   ]
 }

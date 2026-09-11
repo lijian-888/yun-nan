@@ -1,0 +1,36 @@
+name: ynaas-longyun
+
+# Yunnan local runtime overlay. It deliberately keeps the containerized demo
+# database behind a disabled profile and connects application services to the
+# already-backed-up native ynaas_rice_ai PostgreSQL database on Windows.
+services:
+  db:
+    profiles: ["container-database-disabled"]
+
+  api:
+    environment:
+      DATABASE_URL: ${YUNNAN_DATABASE_URL:?Set YUNNAN_DATABASE_URL through scripts/start-yunnan-docker.ps1}
+      MIGRATION_DATABASE_URL: ${YUNNAN_MIGRATION_DATABASE_URL:?Set YUNNAN_MIGRATION_DATABASE_URL through scripts/start-yunnan-docker.ps1}
+      APP_DATABASE_ROLE: ${YUNNAN_APP_DATABASE_ROLE:-ynaas_app}
+      APP_DATABASE_PASSWORD: ${YUNNAN_APP_DATABASE_PASSWORD:?Set YUNNAN_APP_DATABASE_PASSWORD through scripts/start-yunnan-docker.ps1}
+      INSTITUTION_ID: yunnan-academy-agricultural-sciences
+      INSTITUTION_CODE: YNAAS
+      INSTITUTION_NAME: 云南省农业科学院
+      DEFAULT_PROJECT_CODE: YNAAS-DEFAULT
+      DEFAULT_PROJECT_NAME: 云南省农业科学院水稻育种研究
+      DEMO_DATA_ENABLED: "false"
+      INSTITUTION_DATA_ENABLED: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: !override
+      minio:
+        condition: service_healthy
+      mineru:
+        condition: service_healthy
+
+  genotype-worker:
+    environment:
+      MIGRATION_DATABASE_URL: ${YUNNAN_MIGRATION_DATABASE_URL:?Set YUNNAN_MIGRATION_DATABASE_URL through scripts/start-yunnan-docker.ps1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: !override []

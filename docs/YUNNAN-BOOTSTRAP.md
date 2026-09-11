@@ -42,9 +42,25 @@ C:\Users\A\AppData\Roaming\postgresql\ynaas_native_pg_secrets.json
 
 所有初始密码均为占位符或部署变量，并要求首次登录修改。启动 Keycloak 前必须生成独立强密码；不要把替换后的实际导入文件提交到 Git。
 
-当前 Docker Desktop 不可用时，不执行 Realm 导入不影响 PostgreSQL 初始化。待 Docker 修复或提供外部 Keycloak 后，再完成 Realm 导入、登录和三类权限验收。
+Docker Desktop 恢复后，运行 `scripts/start-yunnan-docker.ps1`。该脚本使用 `docker-compose.yunnan.yml` 禁用内部演示 PostgreSQL，连接宿主 `ynaas_rice_ai`，并启动完整本地服务。生成的 Realm、证书和口令均为被 Git 忽略或位于仓库外的运行时文件。
 
 本次实际初始化与验收记录见 [2026-09-11 验证记录](YUNNAN-BOOTSTRAP-VALIDATION-20260911.md)。
+
+## 拉取远端更新的准入条件
+
+只有同时满足以下条件，才可以把远端新代码用于云南智能体本地运行：
+
+1. `docker version` 能返回 Linux Server 版本，当前六项服务的基线验收已通过；
+2. 当前分支是云南集成分支且工作区干净；云南改造尚未合并前使用 `codex/yunnan-bootstrap`，合并后才能改从 `main` 更新；
+3. `ynaas_rice_ai` 已生成本次更新前的全库备份和 schema 备份；
+4. 已审查远端数据库迁移，确认它只做兼容、可重复的增量变更，不会删除、改名或重写既有非 `public` schema；
+5. 先执行 `git fetch origin` 检查提交，再执行 `git pull --ff-only`；出现分叉、冲突或本地改动时立即停止，不做强制覆盖；
+6. 更新后执行 `scripts/start-yunnan-docker.ps1`，让安全初始化、镜像重建和六项服务启动完整跑完；
+7. API、Web、MinIO、MinerU、Keycloak 与 Worker 全部正常，且既有 80 张非 `public` 表的逐表行数与更新前一致、演示业务表仍为 0 行。
+
+被 Git 忽略的 Realm、证书和仓库外运行口令是本机状态，正常 `git pull --ff-only` 不会覆盖；如果远端变更了 Realm 模板或认证配置，应在备份当前 Keycloak 数据后重新生成并单独验收账号与角色。
+
+上述条件满足后即可拉取代码并进行本地运行；但“服务已启动”和“智能体能返回模型答案”是两层状态。当前未配置神农或本地 vLLM 的密钥，因此若要调用真实模型，还必须在本机设置 `SHENNONG_API_KEY`，或把 `AI_PROVIDER`、vLLM 地址和凭据指向可用的本地模型服务。所有模型凭据都必须保留在本机且不得提交。
 
 ## 后续既有数据适配层
 
