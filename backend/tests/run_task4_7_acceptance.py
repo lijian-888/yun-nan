@@ -134,7 +134,7 @@ def main() -> None:
             retrieval_session,
             researcher,
             "public",
-            "HNNF-G001、HNNF-G002 的种质解析和亲本辅助推荐有哪些可引用证据？",
+            "YNAAS-G001、YNAAS-G002 的种质解析和亲本辅助推荐有哪些可引用证据？",
         )
         assert knowledge_cards, "AC7.2/AC7.3: semantic retrieval returned no cited evidence"
         assert "来源：" in knowledge_context and "授权范围：" in knowledge_context, "AC7.3: evidence lacks source or license"

@@ -164,7 +164,7 @@ Direct 任务的后续命令不再由调用方重复提交 Partner URL，而是�
 POST /api/acps/leader/tasks/<TASK_ID>/commands
 {
   "command": "continue",
-  "query": "补充试验环境为海南陵水，比较三年稳定性",
+  "query": "补充试验环境为云南省农业科学院试验基地，比较三年稳定性",
   "wait_for_result": true,
   "auto_complete": true
 }

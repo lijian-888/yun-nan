@@ -31,7 +31,7 @@
 
 隆耘 API 使用的独立应用角色 `ynaas_longyun_api` 已验证可登录，且为 `NOSUPERUSER / NOCREATEDB / NOCREATEROLE / NOREPLICATION / NOBYPASSRLS`。指定的品种、系谱、基因和 NCBI 注释表可读，`ncbi.gene_sequence` 和抓取任务表不可读。
 
-必要系统配置为 1 个云南机构、1 个默认课题、3 个互斥业务账号、1 个科研人员课题成员关系、8 套模板及版本、6 个公共知识分类和 1 套水稻基因型 QC 模板。`variety_basic`、`phenotype_observation`、`trial_data_package`、`breeding_material`、`breeding_program` 均为 0 行，确认没有导入海南/江西演示业务数据。
+必要系统配置为 1 个云南机构、1 个默认课题、3 个互斥业务账号、1 个科研人员课题成员关系、8 套模板及版本、6 个公共知识分类和 1 套水稻基因型 QC 模板。`variety_basic`、`phenotype_observation`、`trial_data_package`、`breeding_material`、`breeding_program` 均为 0 行，确认没有导入任何历史演示业务数据。
 
 ## 代码与构建验证
 

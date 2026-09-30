@@ -53,7 +53,7 @@ Copy-Item keycloak/rice-research-realm.json.example keycloak/rice-research-realm
 .\scripts\bootstrap-yunnan.ps1
 ```
 
-脚本从本机私密 JSON 文件读取数据库与应用角色凭据，不在命令行或输出中显示密码；执行前后逐表比较所有非 `public` 表的精确行数，并拒绝连接非 `ynaas_rice_ai` 数据库。默认只创建表、视图、索引、约束、RLS、云南机构/默认课题/三类账号目录、标准模板和知识分类，不导入历史海南/江西演示业务数据。只有明确需要隔离演示环境时才能显式使用 `-IncludeDemoData`。
+脚本从本机私密 JSON 文件读取数据库与应用角色凭据，不在命令行或输出中显示密码；执行前后逐表比较所有非 `public` 表的精确行数，并拒绝连接非 `ynaas_rice_ai` 数据库。默认只创建表、视图、索引、约束、RLS、云南机构/默认课题/三类账号目录、标准模板和知识分类，不导入任何历史演示业务数据。只有明确需要隔离演示环境时才能显式使用 `-IncludeDemoData`。
 
 Docker Desktop 可用后，执行云南专用完整运行入口：
 

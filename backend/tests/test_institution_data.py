@@ -64,7 +64,7 @@ class InstitutionFileContractTests(unittest.TestCase):
         self.assertEqual(safe_name, "连续性状表型测试数据.xlsx")
         self.assertEqual(complete_suffix(safe_name), ".xlsx")
         self.assertTrue(validate_file_contract("germplasm", safe_name, 1024))
-        self.assertEqual(complete_suffix(safe_object_name("南繁基因型.vcf.gz")), ".vcf.gz")
+        self.assertEqual(complete_suffix(safe_object_name("云南农科院基因型.vcf.gz")), ".vcf.gz")
 
     def test_path_components_are_removed_without_losing_extension(self):
         self.assertEqual(safe_object_name("../../目录/材料数据.xlsx"), "材料数据.xlsx")
@@ -116,7 +116,7 @@ class InstitutionTabularParserTests(unittest.TestCase):
         workbook = Workbook()
         sheet = workbook.active
         sheet.append(["环境编号", "地点", "年份"])
-        sheet.append(["ENV-1", "三亚", 2026])
+        sheet.append(["ENV-1", "云南省农业科学院试验基地", 2026])
         workbook.save(xlsx_path)
         xlsx_rows = normalize_records("environment", parse_tabular_file(xlsx_path, ".xlsx"))
         self.assertEqual(xlsx_rows[0]["environment_id"], "ENV-1")
@@ -189,16 +189,16 @@ class InstitutionGenotypeAndLiteratureTests(unittest.TestCase):
 
         docx_path = self.root / "paper.docx"
         with zipfile.ZipFile(docx_path, "w") as archive:
-            archive.writestr("word/document.xml", "<w:document><w:p><w:t>南繁公开文献</w:t></w:p></w:document>")
+            archive.writestr("word/document.xml", "<w:document><w:p><w:t>云南农科院公开文献</w:t></w:p></w:document>")
         value, warnings = extract_literature_text(docx_path, ".docx")
-        self.assertIn("南繁公开文献", value)
+        self.assertIn("云南农科院公开文献", value)
         self.assertEqual(warnings, [])
 
     def test_policy_and_identifiers_are_deterministic(self):
-        self.assertEqual(safe_identifier("HNNF", "longyun"), "longyun_hnnf")
-        policy = default_access_policy("hainan-nanfan", "longyun-hnnf")
+        self.assertEqual(safe_identifier("YNAAS", "longyun"), "longyun_ynaas")
+        policy = default_access_policy("yunnan-academy-agricultural-sciences", "ynaas-longyun")
         self.assertEqual(policy["effect"], "private")
-        self.assertEqual(policy["principal"], "institution:hainan-nanfan")
+        self.assertEqual(policy["principal"], "institution:yunnan-academy-agricultural-sciences")
 
 
 if __name__ == "__main__":

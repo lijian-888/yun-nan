@@ -64,23 +64,23 @@ def generated_fixtures(root: Path, demo_root: Path, chinese_xlsx: Path) -> list[
     sheet = workbook.create_sheet("环境数据")
     sheet.append(["标题", None, None])
     sheet.append(["environment_id", "location", "year"])
-    sheet.append(["ACCEPT-ENV-1", "三亚", 2026])
+    sheet.append(["ACCEPT-ENV-1", "云南省农业科学院试验基地", 2026])
     workbook.save(xlsx_path)
     fixtures.append(("environment", xlsx_path))
 
-    vcf_gz = root / "南繁基因型验收.vcf.gz"
+    vcf_gz = root / "云南农科院基因型验收.vcf.gz"
     with gzip.open(vcf_gz, "wb") as handle:
         handle.write((demo_root / "genotype.vcf").read_bytes())
     fixtures.append(("genotype", vcf_gz))
 
-    plink = root / "南繁PLINK验收.zip"
+    plink = root / "云南农科院PLINK验收.zip"
     with zipfile.ZipFile(plink, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("acceptance.bed", b"\x6c\x1b\x01")
         archive.writestr("acceptance.bim", "1 rs1 0 1 A G\n")
-        archive.writestr("acceptance.fam", "F1 HNNF-G001 0 0 0 -9\n")
+        archive.writestr("acceptance.fam", "F1 YNAAS-G001 0 0 0 -9\n")
     fixtures.append(("genotype", plink))
 
-    pdf_path = root / "南繁公开文献验收.pdf"
+    pdf_path = root / "云南农科院公开文献验收.pdf"
     document = fitz.open()
     page = document.new_page()
     page.insert_text((72, 72), "Longyun public rice breeding literature acceptance")
@@ -88,9 +88,9 @@ def generated_fixtures(root: Path, demo_root: Path, chinese_xlsx: Path) -> list[
     document.close()
     fixtures.append(("literature", pdf_path))
 
-    docx_path = root / "南繁公开文献验收.docx"
+    docx_path = root / "云南农科院公开文献验收.docx"
     with zipfile.ZipFile(docx_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("word/document.xml", "<w:document><w:p><w:t>南繁公开文献验收</w:t></w:p></w:document>")
+        archive.writestr("word/document.xml", "<w:document><w:p><w:t>云南农科院公开文献验收</w:t></w:p></w:document>")
     fixtures.append(("literature", docx_path))
 
     anomaly = root / "关联异常验收.csv"
@@ -150,7 +150,7 @@ def main() -> None:
     assert required_suffixes <= imported_suffixes, (required_suffixes, imported_suffixes)
 
     batches = list_batches(engine, args.institution_id, args.project_id, 100)
-    trace = trace_entity(engine, args.institution_id, args.project_id, "HNNF-G001")
+    trace = trace_entity(engine, args.institution_id, args.project_id, "YNAAS-G001")
     with engine.connect() as connection:
         counts = dict(connection.execute(text("""
             SELECT 'entities', count(*) FROM data_entity WHERE institution_id=:institution_id AND project_id=:project_id

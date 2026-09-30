@@ -445,7 +445,7 @@ class PlatformAccount(Base):
 
 
 class ResearchProject(Base):
-    """A project boundary inside the one Hainan NanFan institution."""
+    """A project boundary inside the single Yunnan Academy institution."""
 
     __tablename__ = "research_project"
 
@@ -3208,7 +3208,7 @@ def initialize_database(
 
     System configuration (institution, default project, controlled templates,
     public knowledge categories and the QC template) is always idempotently
-    installed. Hainan/Jiangxi sample varieties and simulated trial/dossier rows
+    installed. Legacy sample varieties and simulated trial/dossier rows
     are opt-in only so a real institutional database cannot receive them by
     accident. Runtime repair steps that may update existing ``public`` rows are
     also opt-in and are used by API startup, not by the schema-only CLI.

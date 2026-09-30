@@ -17,7 +17,7 @@ def entity(entity_type, entity_key, payload, batch="batch-1", dataset_type="germ
         "source_batch_id": batch,
         "dataset_type": dataset_type,
         "source_file_name": f"{dataset_type}.xlsx",
-        "object_bucket": "longyun-hnnf",
+        "object_bucket": "ynaas-longyun",
         "object_key": f"project/{dataset_type}.xlsx",
         "file_sha256": "a" * 64,
     }
@@ -26,13 +26,13 @@ def entity(entity_type, entity_key, payload, batch="batch-1", dataset_type="germ
 class GermplasmAnalysisTests(unittest.TestCase):
     def test_analysis_uses_only_available_records_and_names_missing_categories(self):
         result = build_material_analysis_from_records(
-            institution_id="hainan-nanfan",
+            institution_id="yunnan-academy-agricultural-sciences",
             project_id="project-1",
             material_key="M001",
             entities=[
-                entity("germplasm", "M001", {"germplasm_id": "M001", "name": "南繁一号", "aliases": "NF-1"}),
+                entity("germplasm", "M001", {"germplasm_id": "M001", "name": "云稻演示一号", "aliases": "YN-1"}),
                 entity("phenotype_observation", "OBS-1", {"germplasm_id": "M001", "trait_code": "yield", "value": 610, "unit": "kg/亩"}, "batch-2", "phenotype"),
-                entity("literature_document", "DOC-1", {"file_name": "南繁一号试验总结.txt", "text": "南繁一号在试验中完成观测。"}, "batch-3", "literature"),
+                entity("literature_document", "DOC-1", {"file_name": "云稻演示一号试验总结.txt", "text": "云稻演示一号在试验中完成观测。"}, "batch-3", "literature"),
             ],
             relations=[],
             issues=[],
@@ -48,7 +48,7 @@ class GermplasmAnalysisTests(unittest.TestCase):
     def test_unknown_material_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "不存在"):
             build_material_analysis_from_records(
-                institution_id="hainan-nanfan", project_id="project-1", material_key="M404",
+                institution_id="yunnan-academy-agricultural-sciences", project_id="project-1", material_key="M404",
                 entities=[], relations=[], issues=[],
             )
 
@@ -57,19 +57,19 @@ class ParentRecommendationTests(unittest.TestCase):
     def profiles(self):
         return {
             "M001": {
-                "material_key": "M001", "name": "南繁一号",
+                "material_key": "M001", "name": "云稻演示一号",
                 "traits": {"yield": [610, 605, 620], "lodging": [1], "disease": [2], "quality": [80], "complementarity": [105]},
                 "trait_evidence": {"yield": [{"source": {"batch_id": "b1", "entity_key": "o1"}}]},
                 "parents": {"P001", "P002"}, "genotype_sample": True, "sources": [{"batch_id": "b0"}],
             },
             "M002": {
-                "material_key": "M002", "name": "南繁二号",
+                "material_key": "M002", "name": "云稻演示二号",
                 "traits": {"yield": [590, 600, 595], "lodging": [2], "disease": [1], "quality": [85], "complementarity": [92]},
                 "trait_evidence": {"yield": [{"source": {"batch_id": "b2", "entity_key": "o2"}}]},
                 "parents": {"P003", "P004"}, "genotype_sample": True, "sources": [{"batch_id": "b0"}],
             },
             "M003": {
-                "material_key": "M003", "name": "南繁三号",
+                "material_key": "M003", "name": "云稻演示三号",
                 "traits": {"yield": [580, 570, 585], "lodging": [3], "disease": [3], "quality": [75], "complementarity": [110]},
                 "trait_evidence": {"yield": [{"source": {"batch_id": "b3", "entity_key": "o3"}}]},
                 "parents": {"P001", "P005"}, "genotype_sample": False, "sources": [{"batch_id": "b0"}],

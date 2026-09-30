@@ -35,8 +35,8 @@ class ProjectAccessTests(unittest.TestCase):
         self.session = Session(self.engine)
         self.session.add(Institution(
             id=INSTITUTION_ID,
-            institution_code="HNNF",
-            institution_name="海南南繁",
+            institution_code="YNAAS",
+            institution_name="云南省农业科学院",
             status="active",
         ))
         self.session.add_all([
@@ -56,7 +56,7 @@ class ProjectAccessTests(unittest.TestCase):
             ),
             ResearchProject(
                 id="00000000-0000-4000-8000-000000000011",
-                project_code="HNNF-P1",
+                project_code="YNAAS-P1",
                 project_name="课题一",
                 institution_id=INSTITUTION_ID,
                 status="active",
@@ -64,7 +64,7 @@ class ProjectAccessTests(unittest.TestCase):
             ),
             ResearchProject(
                 id="00000000-0000-4000-8000-000000000012",
-                project_code="HNNF-P2",
+                project_code="YNAAS-P2",
                 project_name="课题二",
                 institution_id=INSTITUTION_ID,
                 status="active",
@@ -103,7 +103,7 @@ class ProjectAccessTests(unittest.TestCase):
 
     def test_researcher_only_sees_joined_projects(self):
         projects = accessible_projects(self.session, self.researcher)
-        self.assertEqual([item.project_code for item in projects], ["HNNF-P1"])
+        self.assertEqual([item.project_code for item in projects], ["YNAAS-P1"])
 
     def test_researcher_cannot_select_unjoined_project(self):
         with self.assertRaises(HTTPException) as raised:
@@ -116,7 +116,7 @@ class ProjectAccessTests(unittest.TestCase):
 
     def test_data_processor_can_enter_all_active_projects(self):
         projects = accessible_projects(self.session, self.processor)
-        self.assertEqual({item.project_code for item in projects}, {"HNNF-P1", "HNNF-P2"})
+        self.assertEqual({item.project_code for item in projects}, {"YNAAS-P1", "YNAAS-P2"})
 
     def test_permission_changes_create_queryable_audit_records(self):
         record_permission_audit(
@@ -158,7 +158,7 @@ class ProjectAccessTests(unittest.TestCase):
         ):
             result = create_project(
                 ProjectCreate(
-                    project_code="hnnf-rls-test",
+                    project_code="ynaas-rls-test",
                     project_name="课题创建 RLS 回归测试",
                     description="验证新课题目录初始化之前已设置 RLS 上下文。",
                 ),
@@ -166,7 +166,7 @@ class ProjectAccessTests(unittest.TestCase):
                 self.session,
             )
 
-        self.assertEqual(result["project_code"], "HNNF-RLS-TEST")
+        self.assertEqual(result["project_code"], "YNAAS-RLS-TEST")
         self.assertEqual(events, ["knowledge_context", "project_context", "seed_folders"])
 
 
