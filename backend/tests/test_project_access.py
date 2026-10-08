@@ -12,15 +12,20 @@ from app.main import (
     Institution,
     PermissionAudit,
     PlatformAccount,
+    PlatformAccountCreate,
+    PlatformAccountUpdate,
     ProjectCreate,
     ProjectMember,
     ResearchProject,
     accessible_projects,
     app,
+    create_platform_account,
     create_project,
     platform_context,
     record_permission_audit,
+    require_approved_platform_account,
     resolve_project_access,
+    update_platform_account,
 )
 
 
@@ -61,6 +66,13 @@ class ProjectAccessTests(unittest.TestCase):
                 username="researcher.two",
                 display_name="科研人员二",
                 business_role="researcher",
+                institution_id=INSTITUTION_ID,
+                active=True,
+            ),
+            PlatformAccount(
+                username="fieldadmin.one",
+                display_name="字段管理员一",
+                business_role="field_admin",
                 institution_id=INSTITUTION_ID,
                 active=True,
             ),
@@ -156,6 +168,81 @@ class ProjectAccessTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             resolve_project_access(self.session, second)
         self.assertEqual(raised.exception.status_code, 403)
+
+    def test_disabled_account_is_rejected_before_any_secured_api(self):
+        account = self.session.get(PlatformAccount, "researcher.two")
+        account.active = False
+        self.session.commit()
+        second = CurrentUser(
+            id="subject-researcher-two", username="researcher.two",
+            display_name="科研人员二", roles=frozenset({"researcher"}),
+        )
+        with patch("app.main.SessionLocal", side_effect=lambda: Session(self.engine)):
+            with self.assertRaises(HTTPException) as raised:
+                require_approved_platform_account(second)
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_unapproved_keycloak_user_cannot_enter_workspace(self):
+        unknown = CurrentUser(
+            id="new-subject", username="unknown.researcher",
+            display_name="未获批用户", roles=frozenset({"researcher"}),
+        )
+        with self.assertRaises(HTTPException) as raised:
+            resolve_project_access(self.session, unknown)
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_field_admin_creates_researcher_without_project_membership(self):
+        class FakeIdentity:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+            def create_researcher(self, username, display_name, temporary_password):
+                self_username = username
+                assert self_username == "ynaas.newuser"
+                assert display_name == "新科研人员"
+                assert len(temporary_password) >= 24
+                return "new-keycloak-subject"
+
+        with patch("app.main.KeycloakUserAdmin", return_value=FakeIdentity()):
+            response = create_platform_account(
+                PlatformAccountCreate(username="YNAAS.NewUser", display_name="新科研人员"),
+                self.field_admin, self.session,
+            )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        account = self.session.get(PlatformAccount, "ynaas.newuser")
+        self.assertEqual(account.keycloak_subject, "new-keycloak-subject")
+        self.assertEqual(account.business_role, "researcher")
+        self.assertFalse(self.session.query(ProjectMember).filter_by(username=account.username).count())
+        audit = self.session.query(PermissionAudit).filter_by(action="account_created").one()
+        self.assertNotIn("temporary_password", str(audit.after_state))
+
+    def test_field_admin_deactivation_calls_identity_service(self):
+        account = self.session.get(PlatformAccount, "researcher.two")
+        account.keycloak_subject = "subject-researcher-two"
+        self.session.commit()
+        calls = []
+
+        class FakeIdentity:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+            def set_enabled(self, subject, username, enabled):
+                calls.append((subject, username, enabled))
+
+        with patch("app.main.KeycloakUserAdmin", return_value=FakeIdentity()):
+            update_platform_account(
+                "researcher.two", PlatformAccountUpdate(active=False),
+                self.field_admin, self.session,
+            )
+        self.assertEqual(calls, [("subject-researcher-two", "researcher.two", False)])
+        self.assertFalse(account.active)
 
     def test_permission_changes_create_queryable_audit_records(self):
         record_permission_audit(

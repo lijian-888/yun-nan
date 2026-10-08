@@ -457,6 +457,10 @@ function WorkspaceContext({ platformContext }) {
 function AccountAdministration({ onNotice }) {
   const [accounts, setAccounts] = useState([]);
   const [audits, setAudits] = useState([]);
+  const [newUsername, setNewUsername] = useState("");
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createdCredential, setCreatedCredential] = useState(null);
 
   async function loadDirectory() {
     try {
@@ -472,6 +476,26 @@ function AccountAdministration({ onNotice }) {
 
   useEffect(() => { void loadDirectory(); }, []);
 
+  async function createAccount(event) {
+    event.preventDefault();
+    setCreatedCredential(null);
+    setCreating(true);
+    try {
+      const created = await request("/api/accounts", jsonRequest("POST", {
+        username: newUsername.trim(), display_name: newDisplayName.trim(),
+      }));
+      setCreatedCredential(created);
+      setNewUsername("");
+      setNewDisplayName("");
+      await loadDirectory();
+      onNotice(`科研人员 ${created.display_name} 的账号已开通。`);
+    } catch (error) {
+      onNotice(error.message);
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function toggleAccount(account) {
     try {
       await request(`/api/accounts/${encodeURIComponent(account.username)}`, jsonRequest("PATCH", { active: !account.active }));
@@ -483,9 +507,23 @@ function AccountAdministration({ onNotice }) {
   }
 
   const roleNames = { researcher: "科研人员", data_processor: "数据处理员", field_admin: "字段管理员" };
-  const actionNames = { account_activated: "启用账号", account_deactivated: "停用账号" };
+  const actionNames = { account_created: "开通账号", account_activated: "启用账号", account_deactivated: "停用账号" };
   return <div className="page-stack account-admin-page">
-    <section className="panel"><PanelTitle icon={UserRoundCog} title="云南省农业科学院账号目录" note="身份和角色由 Keycloak 统一认证；获批科研人员可访问院内已发布数据，私人会话和附件仍按账号隔离。此处只维护应用访问状态，不保存或重置密码。" /><div className="table-scroll"><table><thead><tr><th>账号</th><th>姓名</th><th>业务角色</th><th>身份绑定</th><th>应用状态</th><th>操作</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.username}><td>{account.username}</td><td>{account.display_name}</td><td>{roleNames[account.business_role] || account.business_role}</td><td>{account.identity_bound ? "已登录绑定" : "待首次登录"}</td><td>{account.active ? "启用" : "停用"}</td><td><button className={`text-button ${account.active ? "danger" : ""}`} onClick={() => toggleAccount(account)}>{account.active ? "停用" : "启用"}</button></td></tr>)}</tbody></table></div></section>
+    <section className="panel"><PanelTitle icon={UserRoundCog} title="开通科研人员账号" note="仅院方授权管理员可以操作。新人员无需选择课题，首次登录必须修改密码。" />
+      <form className="account-create-form" onSubmit={createAccount}>
+        <label>登录账号<input value={newUsername} onChange={(event) => setNewUsername(event.target.value)} required minLength={3} maxLength={64} pattern="[A-Za-z][A-Za-z0-9._-]*" autoComplete="off" placeholder="例如 ynaas.zhang" /></label>
+        <label>真实姓名<input value={newDisplayName} onChange={(event) => setNewDisplayName(event.target.value)} required minLength={2} maxLength={80} autoComplete="off" placeholder="例如 张老师" /></label>
+        <div className="account-create-role"><span>业务角色</span><strong>科研人员</strong></div>
+        <button type="submit" className="primary-button" disabled={creating}>{creating ? "正在开通…" : "开通账号"}</button>
+      </form>
+      {createdCredential && <div className="account-temporary-credential" role="status">
+        <strong>账号已开通：{createdCredential.username}</strong>
+        <p>临时密码仅在此处显示一次，请通过院内安全渠道交给本人；首次登录时必须修改。</p>
+        <code>{createdCredential.temporary_password}</code>
+        <button type="button" className="secondary-button" onClick={() => setCreatedCredential(null)}>我已记录，关闭显示</button>
+      </div>}
+    </section>
+    <section className="panel"><PanelTitle icon={UserRoundCog} title="云南省农业科学院账号目录" note="身份由登录服务管理；此处开通或停用院内访问，不显示和保存密码。" /><div className="table-scroll"><table><thead><tr><th>账号</th><th>姓名</th><th>业务角色</th><th>登录身份</th><th>应用状态</th><th>操作</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.username}><td>{account.username}</td><td>{account.display_name}</td><td>{roleNames[account.business_role] || account.business_role}</td><td>{account.identity_bound ? "已开通" : "待同步"}</td><td>{account.active ? "启用" : "停用"}</td><td><button className={`text-button ${account.active ? "danger" : ""}`} onClick={() => toggleAccount(account)}>{account.active ? "停用" : "启用"}</button></td></tr>)}</tbody></table></div></section>
     <section className="panel"><PanelTitle icon={ListChecks} title="账号操作记录" note="记录应用账号启停，便于验收与追溯。" /><div className="table-scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>账号</th></tr></thead><tbody>{audits.length ? audits.map((audit) => <tr key={audit.id}><td>{new Date(audit.created_at).toLocaleString("zh-CN")}</td><td>{audit.actor_name}</td><td>{actionNames[audit.action] || audit.action}</td><td>{audit.target_id}</td></tr>) : <EmptyRow colSpan={4} text="暂无账号操作记录。" />}</tbody></table></div></section>
   </div>;
 }

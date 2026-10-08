@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -21,7 +22,7 @@ from bs4 import BeautifulSoup
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field
 from reportlab.lib import colors
@@ -53,6 +54,7 @@ from .acps_adapter import (
 from .auth import (
     CurrentUser,
     audit_actor,
+    configure_account_gate,
     require_business_user,
     require_data_platform_user,
     require_data_processor,
@@ -61,6 +63,12 @@ from .auth import (
     require_knowledge_user,
     require_published_data_reader,
     require_researcher,
+)
+from .keycloak_admin import (
+    KeycloakUserAdmin,
+    ProvisioningConflict,
+    ProvisioningError,
+    ProvisioningUnavailable,
 )
 from .document_parser import SUPPORTED_SUFFIXES as DOCUMENT_SUPPORTED_SUFFIXES, VISION_IMAGE_SUFFIXES, parse_local_document
 from .conversation_title import DEFAULT_RESEARCH_SESSION_TITLE, auto_title_for_first_message
@@ -1121,27 +1129,35 @@ def sync_platform_account(session: Session, user: CurrentUser) -> PlatformAccoun
     role = _business_role(user)
     account = session.get(PlatformAccount, user.username)
     if not account:
-        account = PlatformAccount(
-            username=user.username,
-            keycloak_subject=user.id,
-            display_name=user.display_name or user.username,
-            business_role=role,
-            institution_id=INSTITUTION_ID,
-            active=True,
-        )
-        session.add(account)
-    else:
-        account.keycloak_subject = user.id
-        account.display_name = user.display_name or user.username
-        account.business_role = role
-        # Institution assignment is provisioned by the platform directory and
-        # must not be overwritten on every login. New accounts still enter the
-        # configured default institution automatically.
+        raise HTTPException(403, "账号尚未由院方管理员开通。")
+    if account.keycloak_subject and account.keycloak_subject != user.id:
+        raise HTTPException(403, "账号身份不一致，请联系管理员。")
+    if account.business_role != role:
+        raise HTTPException(403, "账号角色与院方授权不一致，请联系管理员。")
+    account.keycloak_subject = user.id
+    account.display_name = user.display_name or user.username
     account.last_login_at = datetime.now(timezone.utc)
     session.flush()
     if not account.active:
         raise HTTPException(403, "当前业务账号已停用，请联系字段管理员。")
     return account
+
+
+def require_approved_platform_account(user: CurrentUser) -> None:
+    """Deny unapproved/disabled users before any role-protected endpoint runs."""
+    with SessionLocal() as session:
+        account = session.get(PlatformAccount, user.username)
+        if not account or account.institution_id != INSTITUTION_ID:
+            raise HTTPException(403, "账号尚未由院方管理员开通。")
+        if not account.active:
+            raise HTTPException(403, "当前业务账号已停用，请联系管理员。")
+        if account.keycloak_subject and account.keycloak_subject != user.id:
+            raise HTTPException(403, "账号身份不一致，请联系管理员。")
+        if account.business_role not in user.roles:
+            raise HTTPException(403, "账号角色与院方授权不一致，请联系管理员。")
+
+
+configure_account_gate(require_approved_platform_account)
 
 
 def accessible_projects(session: Session, user: CurrentUser) -> list[ResearchProject]:
@@ -2421,6 +2437,11 @@ class ProjectMemberUpdate(BaseModel):
 
 class PlatformAccountUpdate(BaseModel):
     active: bool
+
+
+class PlatformAccountCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z][A-Za-z0-9._-]*$")
+    display_name: str = Field(min_length=2, max_length=80)
 
 
 class ResearchSessionCreate(BaseModel):
@@ -3958,6 +3979,68 @@ def list_platform_accounts(
     } for account in accounts]
 
 
+@app.post("/api/accounts", status_code=201)
+def create_platform_account(
+    payload: PlatformAccountCreate,
+    user: CurrentUser = Depends(require_field_admin),
+    session: Session = Depends(get_session),
+) -> JSONResponse:
+    current_account = sync_platform_account(session, user)
+    username = payload.username.strip().lower()
+    display_name = payload.display_name.strip()
+    if len(display_name) < 2:
+        raise HTTPException(422, "请填写真实姓名。")
+    if session.get(PlatformAccount, username):
+        raise HTTPException(409, "该登录账号已存在。")
+
+    # First phase admits researchers only. Elevated roles remain an operations
+    # decision and cannot be granted through this institution-facing form.
+    temporary_password = secrets.token_urlsafe(24)
+    try:
+        with KeycloakUserAdmin() as identity:
+            subject = identity.create_researcher(username, display_name, temporary_password)
+    except ProvisioningConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ProvisioningUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ProvisioningError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    session.add(PlatformAccount(
+        username=username,
+        keycloak_subject=subject,
+        display_name=display_name,
+        business_role="researcher",
+        institution_id=current_account.institution_id,
+        active=True,
+    ))
+    record_permission_audit(
+        session, user, "account_created", "platform_account", username,
+        after={"business_role": "researcher", "active": True},
+    )
+    try:
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        try:
+            with KeycloakUserAdmin() as identity:
+                identity.delete_new_user(subject)
+        except (ProvisioningError, ProvisioningUnavailable):
+            logging.exception("Failed to compensate a newly created Keycloak account")
+        raise HTTPException(503, "账号目录保存失败，请联系系统运维人员核查。") from exc
+    return JSONResponse(
+        status_code=201,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        content={
+            "username": username,
+            "display_name": display_name,
+            "business_role": "researcher",
+            "temporary_password": temporary_password,
+            "password_must_change": True,
+        },
+    )
+
+
 @app.patch("/api/accounts/{username}")
 def update_platform_account(
     username: str,
@@ -3972,6 +4055,21 @@ def update_platform_account(
     if username == user.username and not payload.active:
         raise HTTPException(409, "不能停用当前登录的字段管理员账号。")
     before = {"active": account.active, "business_role": account.business_role}
+    previous_active = account.active
+    try:
+        with KeycloakUserAdmin() as identity:
+            subject = account.keycloak_subject
+            if not subject:
+                remote_user = identity.find_user(username)
+                if not remote_user:
+                    raise ProvisioningError("身份服务中不存在该账号，请联系系统运维人员。")
+                subject = remote_user["id"]
+            identity.set_enabled(subject, username, payload.active)
+    except ProvisioningUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ProvisioningError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    account.keycloak_subject = subject
     account.active = payload.active
     record_permission_audit(
         session,
@@ -3989,7 +4087,16 @@ def update_platform_account(
         "active": account.active,
         "identity_bound": bool(account.keycloak_subject),
     }
-    session.commit()
+    try:
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        try:
+            with KeycloakUserAdmin() as identity:
+                identity.set_enabled(subject, username, previous_active)
+        except (ProvisioningError, ProvisioningUnavailable):
+            logging.exception("Failed to restore Keycloak account state after a database error")
+        raise HTTPException(503, "账号状态保存失败，请联系系统运维人员核查。") from exc
     return result
 
 

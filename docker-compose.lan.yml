@@ -70,6 +70,10 @@ services:
       KEYCLOAK_ISSUER: ${PUBLIC_PLATFORM_URL:?Set PUBLIC_PLATFORM_URL in deploy/.env.production}/auth/realms/rice-research
       KEYCLOAK_JWKS_URL: http://keycloak:8080/auth/realms/rice-research/protocol/openid-connect/certs
       KEYCLOAK_AUDIENCE: rice-research-web
+      KEYCLOAK_ADMIN_URL: http://keycloak:8080/auth
+      KEYCLOAK_PROVISION_REALM: rice-research
+      KEYCLOAK_PROVISION_CLIENT_ID: ${KEYCLOAK_PROVISION_CLIENT_ID:-}
+      KEYCLOAK_PROVISION_CLIENT_SECRET: ${KEYCLOAK_PROVISION_CLIENT_SECRET:-}
       AI_PROVIDER: ${AI_PROVIDER:-cherryin}
       AI_TASK_TIMEOUT_SECONDS: ${AI_TASK_TIMEOUT_SECONDS:-180}
       AI_TASK_QUEUE_WAIT_SECONDS: ${AI_TASK_QUEUE_WAIT_SECONDS:-300}

@@ -3,7 +3,7 @@
 import os
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 import jwt
@@ -14,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 bearer_scheme = HTTPBearer(auto_error=False)
 _jwks_cache: dict[str, Any] = {"expires_at": 0.0, "keys": {}}
 BUSINESS_ROLES = frozenset({"researcher", "data_processor", "field_admin"})
+_account_gate: Callable[["CurrentUser"], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,12 @@ class CurrentUser:
     username: str
     display_name: str
     roles: frozenset[str]
+
+
+def configure_account_gate(gate: Callable[[CurrentUser], None]) -> None:
+    """Register the application directory check used by every secured API."""
+    global _account_gate
+    _account_gate = gate
 
 
 def _settings() -> tuple[str, str, str]:
@@ -81,12 +88,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials | None = Se
     if len(BUSINESS_ROLES.intersection(roles)) > 1:
         raise HTTPException(403, "当前账号配置了多个业务角色，请由身份管理员保留且仅保留一种角色。")
     display_name = " ".join(part for part in [claims.get("family_name"), claims.get("given_name")] if part).strip()
-    return CurrentUser(
+    user = CurrentUser(
         id=str(claims.get("sub") or ""),
         username=str(claims.get("preferred_username") or ""),
         display_name=display_name or str(claims.get("preferred_username") or "科研人员"),
         roles=roles,
     )
+    if _account_gate is None:
+        raise HTTPException(503, "账号校验服务尚未就绪。")
+    _account_gate(user)
+    return user
 
 
 async def require_researcher(user: CurrentUser = Security(get_current_user)) -> CurrentUser:
