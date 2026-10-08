@@ -77,6 +77,7 @@ def write_private_env(original, values):
     replacements = {
         'KEYCLOAK_PROVISION_CLIENT_ID': CLIENT_ID,
         'KEYCLOAK_PROVISION_CLIENT_SECRET': values['KEYCLOAK_PROVISION_CLIENT_SECRET'],
+        'KEYCLOAK_RESEARCHER_ROLE_ID': values['KEYCLOAK_RESEARCHER_ROLE_ID'],
     }
     lines = original.splitlines()
     for key, value in replacements.items():
@@ -147,6 +148,7 @@ def main():
     manage_users = request(
         'GET', '/admin/realms/{}/clients/{}/roles/manage-users'.format(REALM, management['id']), master_token
     )
+    researcher = request('GET', '/admin/realms/{}/roles/researcher'.format(REALM), master_token)
     request('POST', '/admin/realms/{}/users/{}/role-mappings/clients/{}'.format(
         REALM, service_user['id'], management['id']), master_token,
         payload=[{'id': manage_users['id'], 'name': 'manage-users'}], expected=(204,)
@@ -157,6 +159,7 @@ def main():
     }, form=True)['access_token']
     request('GET', '/admin/realms/{}/users?max=1'.format(REALM), service_token)
     values['KEYCLOAK_PROVISION_CLIENT_SECRET'] = secret
+    values['KEYCLOAK_RESEARCHER_ROLE_ID'] = researcher['id']
     write_private_env(original, values)
     print('Restricted account provisioning is configured and verified; no secrets were displayed.')
 

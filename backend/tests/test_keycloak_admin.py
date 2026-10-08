@@ -15,6 +15,7 @@ class KeycloakUserAdminTests(unittest.TestCase):
             "KEYCLOAK_PROVISION_REALM": "rice-research",
             "KEYCLOAK_PROVISION_CLIENT_ID": "provisioner",
             "KEYCLOAK_PROVISION_CLIENT_SECRET": "test-only-secret",
+            "KEYCLOAK_RESEARCHER_ROLE_ID": "researcher-id",
         })
         self.env.start()
 
@@ -34,8 +35,6 @@ class KeycloakUserAdminTests(unittest.TestCase):
                 self.assertFalse(payload["enabled"])
                 self.assertEqual(payload["requiredActions"], ["UPDATE_PASSWORD"])
                 return httpx.Response(201, headers={"Location": "http://keycloak.test/auth/admin/realms/rice-research/users/new-id"})
-            if path.endswith("/roles/researcher"):
-                return httpx.Response(200, json={"id": "researcher-id", "name": "researcher"})
             if path.endswith("/role-mappings/realm"):
                 self.assertEqual(json.loads(request.content), [{"id": "researcher-id", "name": "researcher"}])
                 return httpx.Response(204)
@@ -63,8 +62,6 @@ class KeycloakUserAdminTests(unittest.TestCase):
                 return httpx.Response(200, json={"access_token": "test-token"})
             if request.method == "POST" and path.endswith("/users"):
                 return httpx.Response(201, headers={"Location": "http://keycloak.test/auth/admin/realms/rice-research/users/new-id"})
-            if path.endswith("/roles/researcher"):
-                return httpx.Response(200, json={"id": "researcher-id"})
             if path.endswith("/role-mappings/realm"):
                 return httpx.Response(403)
             if request.method == "DELETE" and path.endswith("/users/new-id"):

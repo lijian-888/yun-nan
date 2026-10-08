@@ -30,7 +30,8 @@ class KeycloakUserAdmin:
         self.realm = os.getenv("KEYCLOAK_PROVISION_REALM", "rice-research").strip()
         self.client_id = os.getenv("KEYCLOAK_PROVISION_CLIENT_ID", "").strip()
         self.client_secret = os.getenv("KEYCLOAK_PROVISION_CLIENT_SECRET", "").strip()
-        if not self.client_id or not self.client_secret:
+        self.researcher_role_id = os.getenv("KEYCLOAK_RESEARCHER_ROLE_ID", "").strip()
+        if not self.client_id or not self.client_secret or not self.researcher_role_id:
             raise ProvisioningUnavailable("账号开通服务尚未配置，请联系系统运维人员。")
         self.client = httpx.Client(timeout=12, transport=transport)
         self.token: str | None = None
@@ -104,11 +105,8 @@ class KeycloakUserAdmin:
         if not user_id:
             raise ProvisioningError("身份服务未返回新账号标识，请联系系统运维人员核查。")
         try:
-            role = self._request(
-                "GET", f"/admin/realms/{quote(self.realm, safe='')}/roles/researcher"
-            ).json()
             self._request("POST", f"{self._user_path(user_id)}/role-mappings/realm", json=[{
-                "id": role["id"], "name": "researcher",
+                "id": self.researcher_role_id, "name": "researcher",
             }])
             self._request("PUT", f"{self._user_path(user_id)}/reset-password", json={
                 "type": "password", "value": temporary_password, "temporary": True,
