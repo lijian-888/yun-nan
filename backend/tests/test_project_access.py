@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser
 from app.main import (
+    DEFAULT_PROJECT_ID,
     INSTITUTION_ID,
     Institution,
     PermissionAudit,
@@ -15,7 +16,9 @@ from app.main import (
     ProjectMember,
     ResearchProject,
     accessible_projects,
+    app,
     create_project,
+    platform_context,
     record_permission_audit,
     resolve_project_access,
 )
@@ -54,10 +57,17 @@ class ProjectAccessTests(unittest.TestCase):
                 institution_id=INSTITUTION_ID,
                 active=True,
             ),
+            PlatformAccount(
+                username="researcher.two",
+                display_name="科研人员二",
+                business_role="researcher",
+                institution_id=INSTITUTION_ID,
+                active=True,
+            ),
             ResearchProject(
-                id="00000000-0000-4000-8000-000000000011",
+                id=DEFAULT_PROJECT_ID,
                 project_code="YNAAS-P1",
-                project_name="课题一",
+                project_name="院内工作区",
                 institution_id=INSTITUTION_ID,
                 status="active",
                 created_by="test",
@@ -71,12 +81,6 @@ class ProjectAccessTests(unittest.TestCase):
                 created_by="test",
             ),
         ])
-        self.session.add(ProjectMember(
-            project_id="00000000-0000-4000-8000-000000000011",
-            username="researcher.one",
-            member_role="researcher",
-            created_by="test",
-        ))
         self.session.commit()
         self.researcher = CurrentUser(
             id="subject-researcher-one",
@@ -101,11 +105,18 @@ class ProjectAccessTests(unittest.TestCase):
         self.session.close()
         self.engine.dispose()
 
-    def test_researcher_only_sees_joined_projects(self):
+    def test_researcher_without_membership_enters_institution_workspace(self):
         projects = accessible_projects(self.session, self.researcher)
         self.assertEqual([item.project_code for item in projects], ["YNAAS-P1"])
+        second = CurrentUser(
+            id="subject-researcher-two",
+            username="researcher.two",
+            display_name="科研人员二",
+            roles=frozenset({"researcher"}),
+        )
+        self.assertEqual(resolve_project_access(self.session, second).id, DEFAULT_PROJECT_ID)
 
-    def test_researcher_cannot_select_unjoined_project(self):
+    def test_researcher_cannot_select_other_workspace(self):
         with self.assertRaises(HTTPException) as raised:
             resolve_project_access(
                 self.session,
@@ -114,9 +125,37 @@ class ProjectAccessTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.status_code, 403)
 
-    def test_data_processor_can_enter_all_active_projects(self):
+    def test_data_processor_sees_only_institution_workspace(self):
         projects = accessible_projects(self.session, self.processor)
-        self.assertEqual({item.project_code for item in projects}, {"YNAAS-P1", "YNAAS-P2"})
+        self.assertEqual({item.project_code for item in projects}, {"YNAAS-P1"})
+
+    def test_context_exposes_institution_and_user_without_project_selector(self):
+        context = platform_context(self.researcher, self.session)
+        self.assertEqual(context["institution"]["code"], "YNAAS")
+        self.assertEqual(context["user"]["username"], "researcher.one")
+        self.assertNotIn("projects", context)
+        self.assertNotIn("active_project_id", context)
+
+    def test_project_management_routes_are_not_exposed(self):
+        paths = {route.path for route in app.routes}
+        self.assertNotIn("/api/projects", paths)
+        self.assertNotIn("/api/projects/{project_id}", paths)
+        self.assertNotIn("/api/projects/{project_id}/members", paths)
+        self.assertNotIn("/api/projects/{project_id}/members/{username}", paths)
+
+    def test_disabled_account_cannot_enter_workspace(self):
+        account = self.session.get(PlatformAccount, "researcher.two")
+        account.active = False
+        self.session.commit()
+        second = CurrentUser(
+            id="subject-researcher-two",
+            username="researcher.two",
+            display_name="科研人员二",
+            roles=frozenset({"researcher"}),
+        )
+        with self.assertRaises(HTTPException) as raised:
+            resolve_project_access(self.session, second)
+        self.assertEqual(raised.exception.status_code, 403)
 
     def test_permission_changes_create_queryable_audit_records(self):
         record_permission_audit(

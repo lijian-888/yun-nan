@@ -237,7 +237,7 @@ def build_material_analysis_from_records(
         None,
     )
     if not germplasm:
-        raise ValueError("所选种质材料不存在于当前课题的机构数据中。")
+        raise ValueError("所选种质材料不存在于院内数据中。")
     basic = dict(germplasm.get("payload") or {})
     names = {material_key, str(basic.get("name") or "")}
     aliases = basic.get("aliases") or basic.get("alias") or []
@@ -829,7 +829,7 @@ def rank_parent_combinations(
         "constraint_weight_adjustments": weight_adjustments,
         "weights": weights,
         "sources": list(all_sources.values()),
-        "method": "按当前课题及本次请求配置的筛选条件、权重和排序方式，对实际存在的证据维度归一化后排序；缺失维度不虚构、不计分并降低可信程度。",
+        "method": "按院内数据及本次请求配置的筛选条件、权重和排序方式，对实际存在的证据维度归一化后排序；缺失维度不虚构、不计分并降低可信程度。",
         "engine_version": RECOMMENDATION_VERSION,
         "recommendations": ranked,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -851,7 +851,7 @@ def run_parent_recommendation(
     profiles = _candidate_profiles(entities, candidate_keys)
     missing = [key for key, profile in profiles.items() if not profile["sources"]]
     if missing:
-        raise ValueError(f"候选亲本不存在于当前课题：{'、'.join(missing)}。")
+        raise ValueError(f"候选亲本不存在于院内数据：{'、'.join(missing)}。")
     return rank_parent_combinations(
         profiles, weights, breeding_goal, constraints,
         filter_settings=filter_settings, sort_mode=sort_mode,

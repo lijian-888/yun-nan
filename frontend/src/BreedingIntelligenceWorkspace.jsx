@@ -73,7 +73,7 @@ export default function BreedingIntelligenceWorkspace({ onNotice }) {
         setSortMode(ruleValue.sort_mode || "score");
         if (materialRows.length) setSelectedMaterial(materialRows[0].material_key);
       } catch (requestError) {
-        setError(requestError.message || "无法读取当前课题的种质证据。");
+        setError(requestError.message || "无法读取院内种质证据。");
       } finally {
         setLoading(false);
       }
@@ -128,17 +128,17 @@ export default function BreedingIntelligenceWorkspace({ onNotice }) {
   if (loading) return <div className="workspace-loading"><LoaderCircle className="spin" size={20} />正在读取种质证据…</div>;
 
   return <section className="intelligence-workspace">
-    <header className="workspace-hero"><div><span>任务 4–5 · 证据驱动</span><h2>种质解析与亲本组合辅助推荐</h2><p>仅汇总当前课题真实导入的数据；缺失内容不推断，推荐结果不是确定性预测。</p></div><ShieldCheck size={30} /></header>
+    <header className="workspace-hero"><div><span>任务 4–5 · 证据驱动</span><h2>种质解析与亲本组合辅助推荐</h2><p>仅汇总院内真实导入的数据；缺失内容不推断，推荐结果不是确定性预测。</p></div><ShieldCheck size={30} /></header>
     <div className="workspace-tabs"><button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}><FileSearch size={16} />种质综合解析</button><button className={tab === "recommendation" ? "active" : ""} onClick={() => setTab("recommendation")}><Scale size={16} />亲本辅助推荐</button></div>
     {error && <div className="workspace-error"><AlertTriangle size={17} />{error}</div>}
 
     {tab === "analysis" ? <>
-      <section className="workspace-card control-card"><label>选择当前课题种质材料<select value={selectedMaterial} onChange={(event) => setSelectedMaterial(event.target.value)}>{materials.map((item) => <option key={item.material_key} value={item.material_key}>{item.material_key} · {item.name}</option>)}</select></label><button className="primary-button" onClick={runAnalysis} disabled={!selectedMaterial || running}>{running ? <LoaderCircle className="spin" size={16} /> : <FileSearch size={16} />}生成综合解析</button></section>
-      {!materials.length && <div className="workspace-empty">当前课题尚未导入种质资源，请先由数据处理员完成机构数据导入。</div>}
+      <section className="workspace-card control-card"><label>选择院内种质材料<select value={selectedMaterial} onChange={(event) => setSelectedMaterial(event.target.value)}>{materials.map((item) => <option key={item.material_key} value={item.material_key}>{item.material_key} · {item.name}</option>)}</select></label><button className="primary-button" onClick={runAnalysis} disabled={!selectedMaterial || running}>{running ? <LoaderCircle className="spin" size={16} /> : <FileSearch size={16} />}生成综合解析</button></section>
+      {!materials.length && <div className="workspace-empty">院内尚未导入种质资源，请先由数据处理员完成数据导入。</div>}
       {analysis && <>
         <section className="workspace-card analysis-summary"><div><small>综合解析运行 {analysis.run_id}</small><h3>{analysis.material_name}（{analysis.material_key}）</h3><p>{analysis.summary}</p></div><button onClick={() => download(`/api/research/intelligence/material-analysis/${analysis.run_id}/report.pdf`, `${analysis.material_key}-综合解析.pdf`).catch((downloadError) => onNotice?.(downloadError.message))}><Download size={16} />下载 PDF</button></section>
         {analysis.missing_categories?.length > 0 && <section className="workspace-warning"><AlertTriangle size={18} /><div><strong>缺失数据</strong><span>{analysis.missing_categories.join("、")}。系统未对这些内容生成结论。</span></div></section>}
-        {Object.entries(analysis.sections || {}).map(([key, section]) => <section className="workspace-card evidence-section" key={key}><header><h3>{SECTION_LABELS[key] || key}</h3><span className={section.available ? "status-ready" : "status-missing"}>{section.available ? `${section.records?.length || 0} 条证据` : "缺失"}</span></header>{section.available ? <DataTable rows={section.records} /> : <p className="intelligence-empty">当前课题未导入或未关联此类数据。</p>}</section>)}
+        {Object.entries(analysis.sections || {}).map(([key, section]) => <section className="workspace-card evidence-section" key={key}><header><h3>{SECTION_LABELS[key] || key}</h3><span className={section.available ? "status-ready" : "status-missing"}>{section.available ? `${section.records?.length || 0} 条证据` : "缺失"}</span></header>{section.available ? <DataTable rows={section.records} /> : <p className="intelligence-empty">院内数据尚未导入或关联此类证据。</p>}</section>)}
         <section className="workspace-card"><h3>不确定性、异常与来源</h3><ul className="evidence-list">{analysis.uncertainties?.map((item) => <li key={item}>{item}</li>)}</ul><details><summary>查看 {analysis.sources?.length || 0} 条可追溯来源</summary><DataTable rows={analysis.sources} /></details></section>
       </>}
     </> : <>
@@ -157,7 +157,7 @@ export default function BreedingIntelligenceWorkspace({ onNotice }) {
           <p>必须具备的证据维度（缺失即排除）：</p>
           <div className="dimension-check-grid">{Object.entries(weightLabels).map(([key, label]) => <label key={key}><input type="checkbox" checked={filterSettings.required_dimensions.includes(key)} onChange={() => toggleRequiredDimension(key)} />{label}</label>)}</div>
         </div>
-        {rule && <details open><summary>调整本次评分权重（课题规则版本 {rule.version}）</summary><div className="weight-input-grid">{Object.entries(recommendationWeights).map(([key, value]) => <label key={key}>{weightLabels[key] || key}<input type="number" min="0" max="100" value={value} onChange={(event) => setRecommendationWeights({ ...recommendationWeights, [key]: Number(event.target.value) })} /></label>)}</div><p>{rule.rule_note}</p></details>}
+        {rule && <details open><summary>调整本次评分权重（规则版本 {rule.version}）</summary><div className="weight-input-grid">{Object.entries(recommendationWeights).map(([key, value]) => <label key={key}>{weightLabels[key] || key}<input type="number" min="0" max="100" value={value} onChange={(event) => setRecommendationWeights({ ...recommendationWeights, [key]: Number(event.target.value) })} /></label>)}</div><p>{rule.rule_note}</p></details>}
         <button className="primary-button" onClick={runRecommendation} disabled={running || selectedParents.length < 2}>{running ? <LoaderCircle className="spin" size={16} /> : <Scale size={16} />}生成辅助推荐</button>
       </section>
       {recommendation && <section className="workspace-card recommendation-results">

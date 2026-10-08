@@ -2,7 +2,7 @@
   "realm": "rice-research",
   "enabled": true,
   "sslRequired": "EXTERNAL",
-  "displayName": "云南省农业科学院 · 隆耘 Agent 育种智能体",
+  "displayName": "云南省农业科学院 · 水稻育种智能体",
   "loginTheme": "rice-research",
   "registrationAllowed": false,
   "loginWithEmailAllowed": false,
@@ -19,7 +19,7 @@
   "clients": [
     {
       "clientId": "rice-research-web",
-      "name": "YNAAS Longyun Agent Breeding Intelligence Web",
+      "name": "云南水稻育种智能体 Web",
       "publicClient": true,
       "protocol": "openid-connect",
       "standardFlowEnabled": true,

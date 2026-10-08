@@ -1146,28 +1146,24 @@ def sync_platform_account(session: Session, user: CurrentUser) -> PlatformAccoun
 
 def accessible_projects(session: Session, user: CurrentUser) -> list[ResearchProject]:
     account = sync_platform_account(session, user)
+    # Yunnan trial has one institution-wide workspace.  The legacy project_id
+    # remains an internal RLS/storage namespace, not a user-managed permission.
     statement = select(ResearchProject).where(
+        ResearchProject.id == DEFAULT_PROJECT_ID,
         ResearchProject.institution_id == account.institution_id,
         ResearchProject.status == "active",
     )
-    if "researcher" in user.roles and not {"field_admin", "data_processor"}.intersection(user.roles):
-        statement = statement.join(ProjectMember, ProjectMember.project_id == ResearchProject.id).where(
-            ProjectMember.username == user.username
-        )
-    return list(session.scalars(statement.order_by(ResearchProject.created_at, ResearchProject.project_name)).all())
+    return list(session.scalars(statement).all())
 
 
 def resolve_project_access(session: Session, user: CurrentUser, requested_project_id: str | None = None) -> ResearchProject:
     projects = accessible_projects(session, user)
     if not projects:
-        raise HTTPException(403, "当前账号尚未加入任何课题，请联系字段管理员分配课题。")
+        raise HTTPException(403, "当前账号无权访问云南省农业科学院工作台，请联系管理员。")
     project_id = (requested_project_id or "").strip()
-    if project_id:
-        project = next((item for item in projects if item.id == project_id), None)
-        if not project:
-            raise HTTPException(403, "当前账号无权访问所选课题。")
-        return project
-    return next((item for item in projects if item.id == DEFAULT_PROJECT_ID), projects[0])
+    if project_id and project_id != DEFAULT_PROJECT_ID:
+        raise HTTPException(403, "云南试用版不支持切换工作区。")
+    return projects[0]
 
 
 def record_permission_audit(
@@ -3079,7 +3075,7 @@ def ensure_single_institution_schema(session: Session) -> None:
             id=DEFAULT_PROJECT_ID,
             project_code=DEFAULT_PROJECT_CODE,
             project_name=DEFAULT_PROJECT_NAME,
-            description=f"{INSTITUTION_NAME}统一默认课题。",
+            description=f"{INSTITUTION_NAME}院内统一工作区。",
             institution_id=INSTITUTION_ID,
             status="active",
             created_by="system-bootstrap",
@@ -3089,20 +3085,6 @@ def ensure_single_institution_schema(session: Session) -> None:
         project.institution_id = INSTITUTION_ID
     session.flush()
 
-    for username, _, role in DEFAULT_PLATFORM_ACCOUNTS:
-        if role != "researcher":
-            continue
-        membership = session.scalar(select(ProjectMember).where(
-            ProjectMember.project_id == DEFAULT_PROJECT_ID,
-            ProjectMember.username == username,
-        ))
-        if not membership:
-            session.add(ProjectMember(
-                project_id=DEFAULT_PROJECT_ID,
-                username=username,
-                member_role="researcher",
-                created_by="system-bootstrap",
-            ))
     session.commit()
 
     orm_project_tables = (
@@ -3489,7 +3471,7 @@ def get_institution_entity_trace(
         entity_key,
     )
     if not trace["entities"] and not trace["relations"] and not trace["issues"]:
-        raise HTTPException(404, "当前机构和课题下未找到该实体标识。")
+        raise HTTPException(404, "院内数据中未找到该实体标识。")
     return {
         "institution_id": account.institution_id,
         "project_id": active_project_id(session),
@@ -3546,7 +3528,7 @@ def material_analysis_report(
 ) -> Response:
     result = get_material_analysis_run(session, run_id, user.id, active_project_id(session))
     if not result:
-        raise HTTPException(404, "未找到当前账号在本课题创建的种质解析记录。")
+        raise HTTPException(404, "未找到当前账号创建的种质解析记录。")
     return Response(
         content=build_intelligence_pdf("种质资源综合解析报告", result),
         media_type="application/pdf",
@@ -3643,7 +3625,7 @@ def create_parent_recommendations(
 def _parent_recommendation_for_current_user(session: Session, run_id: str, user: CurrentUser) -> dict[str, Any]:
     result = get_parent_recommendation_run(session, run_id, user.id, active_project_id(session))
     if not result:
-        raise HTTPException(404, "未找到当前账号在本课题创建的亲本辅助推荐记录。")
+        raise HTTPException(404, "未找到当前账号创建的亲本辅助推荐记录。")
     return result
 
 
@@ -3707,7 +3689,7 @@ def get_trial_analysis_package_options(
         WHERE id=:package_id AND project_id=:project_id AND governance_status='published'
     """), {"package_id": package_id, "project_id": active_project_id(session)}).scalar_one_or_none()
     if not package_exists:
-        raise HTTPException(404, "所选区域试验资料包不存在、未发布或不属于当前课题。")
+        raise HTTPException(404, "所选区域试验资料包不存在或尚未发布到院内工作台。")
     trials = session.execute(text("""
         SELECT DISTINCT trial.trial_year, site.site_code, site.site_name
         FROM field_trial trial JOIN trial_site site ON site.id=trial.site_id
@@ -3763,7 +3745,7 @@ def create_controlled_trial_analysis(
         WHERE id=:package_id AND project_id=:project_id AND governance_status='published'
     """), {"package_id": payload.package_id, "project_id": active_project_id(session)}).mappings().first()
     if not package:
-        raise HTTPException(404, "所选区域试验资料包不存在、未发布或不属于当前课题。")
+        raise HTTPException(404, "所选区域试验资料包不存在或尚未发布到院内工作台。")
     if payload.analysis_type == "same_trial" and (not payload.year or not payload.site_name.strip()):
         raise HTTPException(422, "同一试验材料比较必须选择年份和地点。")
     if payload.analysis_type == "decline" and not payload.material_code.strip():
@@ -3809,7 +3791,7 @@ def _trial_run_for_current_user(session: Session, run_id: str, user: CurrentUser
         WHERE run.id=:run_id AND run.requested_by=:owner_id AND package.project_id=:project_id
     """), {"run_id": run_id, "owner_id": user.id, "project_id": active_project_id(session)}).mappings().first()
     if not row:
-        raise HTTPException(404, "未找到当前账号在本课题创建的试验分析记录。")
+        raise HTTPException(404, "未找到当前账号创建的试验分析记录。")
     return intelligence_json_safe(dict(row))
 
 
@@ -3852,20 +3834,18 @@ def controlled_trial_report(
 
 @app.get("/api/context")
 def platform_context(
-    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
     user: CurrentUser = Depends(require_business_user),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    project = resolve_project_access(session, user, x_project_id)
-    projects = accessible_projects(session, user)
+    workspace = resolve_project_access(session, user)
     account = session.get(PlatformAccount, user.username)
     institution = session.get(Institution, account.institution_id) if account else None
     session.commit()
     return {
         "institution": {
-            "id": institution.id if institution else project.institution_id,
-            "code": institution.institution_code if institution else project.institution_id,
-            "name": institution.institution_name if institution else project.institution_id,
+            "id": institution.id if institution else workspace.institution_id,
+            "code": institution.institution_code if institution else workspace.institution_id,
+            "name": institution.institution_name if institution else workspace.institution_id,
         },
         "user": {
             "id": user.id,
@@ -3874,12 +3854,11 @@ def platform_context(
             "business_role": _business_role(user),
             "roles": sorted(user.roles),
         },
-        "active_project_id": project.id,
-        "projects": [serialize_project(item) for item in projects],
     }
 
 
-@app.get("/api/projects")
+# Legacy project helpers remain for existing database migrations and tests, but
+# are no longer exposed as HTTP routes in the single-workspace Yunnan trial.
 def list_projects(
     user: CurrentUser = Depends(require_business_user),
     session: Session = Depends(get_session),
@@ -3893,7 +3872,6 @@ def list_projects(
     return result
 
 
-@app.post("/api/projects")
 def create_project(
     payload: ProjectCreate,
     user: CurrentUser = Depends(require_field_admin),
@@ -3933,7 +3911,6 @@ def create_project(
     return result
 
 
-@app.patch("/api/projects/{project_id}")
 def update_project(
     project_id: str,
     payload: ProjectUpdate,
@@ -4016,7 +3993,6 @@ def update_platform_account(
     return result
 
 
-@app.get("/api/projects/{project_id}/members")
 def list_project_members(
     project_id: str,
     user: CurrentUser = Depends(require_field_admin),
@@ -4044,7 +4020,6 @@ def list_project_members(
     } for member, account in rows]
 
 
-@app.put("/api/projects/{project_id}/members/{username}")
 def upsert_project_member(
     project_id: str,
     username: str,
@@ -4091,7 +4066,6 @@ def upsert_project_member(
     return result
 
 
-@app.delete("/api/projects/{project_id}/members/{username}")
 def remove_project_member(
     project_id: str,
     username: str,
@@ -4944,7 +4918,7 @@ def get_owned_research_session(session: Session, session_id: str) -> ResearchSes
             ProjectMember.username == username,
         ))
         if not membership:
-            raise HTTPException(404, "未找到该会话，或当前账号已无权访问所属课题。")
+            raise HTTPException(404, "未找到该会话，或当前账号无权访问。")
     return item
 
 

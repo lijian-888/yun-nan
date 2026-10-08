@@ -41,8 +41,8 @@ import InstitutionDataWorkspace from "./InstitutionDataWorkspace";
 
 const roles = [
   { id: "processor", label: "数据处理员", user: "数据处理员-张三", icon: ClipboardCheck, description: "导入、规则、质检、逐条审核与发布" },
-  { id: "researcher", label: "科研人员", user: "科研人员-王研究员", icon: FlaskConical, description: "只查询有权课题的已发布数据、对比和下载报告" },
-  { id: "admin", label: "字段管理员", user: "字段管理员-陈工", icon: UserRoundCog, description: "维护课题成员、字段模板、规则和公共知识" },
+  { id: "researcher", label: "科研人员", user: "科研人员-王研究员", icon: FlaskConical, description: "查询院内已发布数据、对比和下载报告" },
+  { id: "admin", label: "字段管理员", user: "字段管理员-陈工", icon: UserRoundCog, description: "维护账号状态、字段模板、规则和公共知识" },
 ];
 
 const traitLabels = {
@@ -56,9 +56,9 @@ const traitLabels = {
 const DEFAULT_COMPARISON_FIELDS = ["plant_height", "thousand_grain_weight", "yield_per_mu", "leaf_blast_score"];
 const CHART_COLORS = ["#19765d", "#d4a72c", "#5d7fbc", "#c87050", "#7d9c61", "#8a6c9d"];
 
-function App({ user, accessRole = "data_processor", platformContext, onProjectChange }) {
+function App({ user, accessRole = "data_processor", platformContext }) {
   const roleId = accessRole === "field_admin" ? "admin" : "processor";
-  const [page, setPage] = useState(accessRole === "field_admin" ? "projects" : "workbench");
+  const [page, setPage] = useState(accessRole === "field_admin" ? "accounts" : "workbench");
   const [dashboard, setDashboard] = useState({});
   const [workbench, setWorkbench] = useState({ sources: [], pending_observations: [] });
   const [genotypeGovernanceRequests, setGenotypeGovernanceRequests] = useState([]);
@@ -138,7 +138,7 @@ function App({ user, accessRole = "data_processor", platformContext, onProjectCh
   }, [roleId]);
 
   useEffect(() => {
-    setPage(accessRole === "field_admin" ? "projects" : "workbench");
+    setPage(accessRole === "field_admin" ? "accounts" : "workbench");
   }, [accessRole]);
 
   async function uploadFile(event) {
@@ -407,7 +407,7 @@ function App({ user, accessRole = "data_processor", platformContext, onProjectCh
     ? [{ id: "institution-data", label: "机构数据导入", icon: Database }, { id: "workbench", label: "数据处理工作台", icon: FolderInput }, { id: "trial-packages", label: "区域试验数据导入", icon: FileSpreadsheet }, { id: "manual", label: "手工补录", icon: FilePlus2 }, { id: "genotype-governance", label: "基因型治理申请", icon: FlaskConical }]
     : roleId === "researcher"
       ? [{ id: "research", label: "科研查询与分析", icon: Search }]
-    : [{ id: "projects", label: "课题与账号", icon: UsersRound }, { id: "templates", label: "标准模板管理", icon: ShieldCheck }, { id: "rules", label: "规则版本与字段映射", icon: SlidersHorizontal }, { id: "knowledge", label: "公共知识库", icon: BookOpen }, { id: "overview", label: "系统概览", icon: LayoutDashboard }];
+    : [{ id: "accounts", label: "账号管理", icon: UsersRound }, { id: "templates", label: "标准模板管理", icon: ShieldCheck }, { id: "rules", label: "规则版本与字段映射", icon: SlidersHorizontal }, { id: "knowledge", label: "公共知识库", icon: BookOpen }, { id: "overview", label: "系统概览", icon: LayoutDashboard }];
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -415,7 +415,7 @@ function App({ user, accessRole = "data_processor", platformContext, onProjectCh
         <div className="brand-mark brand-logo-mark" aria-hidden="true"><img src="/brand/longyun-agent-logo.png" alt="" /></div>
         <div><strong>隆耘 Agent</strong><span>水稻育种研究与数据治理</span></div>
       </div>
-      <WorkspaceContext platformContext={platformContext} onProjectChange={onProjectChange} />
+      <WorkspaceContext platformContext={platformContext} />
       <nav>{navItems.map((item) => <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => { setPage(item.id); setAccountMenuOpen(false); }}><item.icon size={18} />{item.label}<ChevronRight size={15} /></button>)}</nav>
       <div className="sidebar-bottom">
         {accountMenuOpen && <div className="sidebar-account-menu">
@@ -425,11 +425,11 @@ function App({ user, accessRole = "data_processor", platformContext, onProjectCh
         <button type="button" className={accountMenuOpen ? "sidebar-account expanded" : "sidebar-account"} onClick={() => setAccountMenuOpen((open) => !open)} aria-expanded={accountMenuOpen}>
           <UsersRound size={17} /><span><strong>{role.user}</strong><small>{role.label}</small></span><ChevronDown size={16} />
         </button>
-        <div className="local-note"><ShieldCheck size={18} /><div><strong>{platformContext?.institution?.name || "云南省农业科学院"}</strong><span>单机构环境 · 课题与私人会话独立隔离</span></div></div>
+        <div className="local-note"><ShieldCheck size={18} /><div><strong>{platformContext?.institution?.name || "云南省农业科学院"}</strong><span>院内已发布数据共享 · 私人会话按账号隔离</span></div></div>
       </div>
     </aside>
     <main className="main">
-      <header className="topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {platformContext?.projects?.find((item) => item.id === platformContext.active_project_id)?.project_name || "课题工作区"}</p><h1>{navItems.find((item) => item.id === page)?.label || "隆耘平台"}</h1></div><div className="top-actions"><button className="icon-button" title="刷新数据" onClick={loadBase}><RefreshCw size={18} /></button></div></header>
+      <header className="topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · 院内工作台</p><h1>{navItems.find((item) => item.id === page)?.label || "水稻育种平台"}</h1></div><div className="top-actions"><button className="icon-button" title="刷新数据" onClick={loadBase}><RefreshCw size={18} /></button></div></header>
       {message && <div className="toast"><Info size={17} /><span>{message}</span><button onClick={() => setMessage("")}><X size={16} /></button></div>}
       {page === "workbench" && <Workbench dashboard={dashboard} workbench={workbench} preview={preview} url={url} setUrl={setUrl} fileInput={fileInput} uploadFile={uploadFile} importUrl={importUrl} templates={templates} templateVersionId={templateVersionId} setTemplateVersionId={setTemplateVersionId} updatePreviewCandidate={updatePreviewCandidate} commitPreview={commitPreview} commitAllPreview={commitAllPreview} submitFieldRequest={submitFieldRequest} reprocessSource={reprocessSource} setEditing={setEditing} publish={publish} onOpenTrialPackages={() => setPage("trial-packages")} />}
       {page === "institution-data" && <InstitutionDataWorkspace onNotice={setMessage} />}
@@ -441,94 +441,36 @@ function App({ user, accessRole = "data_processor", platformContext, onProjectCh
       {page === "research" && <Research filters={filters} setFilters={setFilters} searchResearch={searchResearch} rows={researchRows} selected={selected} toggleSelection={toggleSelection} openDetail={openDetail} downloadCsv={downloadCsv} downloadXlsx={downloadXlsx} downloadPng={downloadPng} downloadPdf={downloadPdf} chartRef={chartRef} catalog={catalog} />}
       {page === "knowledge" && <KnowledgeLibrary adminMode onNotice={setMessage} />}
       {page === "overview" && <Overview dashboard={dashboard} rules={rules} />}
-      {page === "projects" && <ProjectAdministration platformContext={platformContext} onProjectChange={onProjectChange} onNotice={setMessage} />}
+      {page === "accounts" && <AccountAdministration onNotice={setMessage} />}
     </main>
     {editing && <EditModal observation={editing} setObservation={setEditing} onClose={() => setEditing(null)} onSave={saveObservation} />}
     {detail && <DetailDrawer detail={detail} onClose={() => setDetail(null)} />}
   </div>;
 }
 
-function WorkspaceContext({ platformContext, onProjectChange }) {
-  const projects = platformContext?.projects || [];
-  return <section className="workspace-context" aria-label="当前云南省农业科学院课题">
+function WorkspaceContext({ platformContext }) {
+  return <section className="workspace-context" aria-label="当前机构">
     <span>{platformContext?.institution?.name || "云南省农业科学院"}</span>
-    <label>当前课题<select value={platformContext?.active_project_id || ""} onChange={(event) => onProjectChange?.(event.target.value)}>{projects.map((project) => <option key={project.id} value={project.id}>{project.project_name}</option>)}</select></label>
   </section>;
 }
 
-function ProjectAdministration({ platformContext, onProjectChange, onNotice }) {
-  const [projects, setProjects] = useState(platformContext?.projects || []);
+function AccountAdministration({ onNotice }) {
   const [accounts, setAccounts] = useState([]);
-  const [members, setMembers] = useState([]);
   const [audits, setAudits] = useState([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(platformContext?.active_project_id || "");
-  const [candidateUsername, setCandidateUsername] = useState("");
 
   async function loadDirectory() {
     try {
-      const [projectRows, accountRows, auditRows] = await Promise.all([
-        request("/api/projects"), request("/api/accounts"), request("/api/permission-audits"),
+      const [accountRows, auditRows] = await Promise.all([
+        request("/api/accounts"), request("/api/permission-audits"),
       ]);
-      setProjects(projectRows);
       setAccounts(accountRows);
-      setAudits(auditRows);
-      setSelectedProjectId((current) => projectRows.some((item) => item.id === current) ? current : projectRows[0]?.id || "");
-    } catch (error) {
-      onNotice(error.message);
-    }
-  }
-
-  async function loadMembers(projectId) {
-    if (!projectId) return setMembers([]);
-    try {
-      setMembers(await request(`/api/projects/${projectId}/members`));
+      setAudits(auditRows.filter((audit) => audit.target_type === "platform_account"));
     } catch (error) {
       onNotice(error.message);
     }
   }
 
   useEffect(() => { void loadDirectory(); }, []);
-  useEffect(() => { void loadMembers(selectedProjectId); }, [selectedProjectId]);
-
-  async function createProject(event) {
-    event.preventDefault();
-    // React clears currentTarget after the handler yields, so retain the form
-    // element before awaiting the API request.
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    try {
-      const project = await request("/api/projects", jsonRequest("POST", {
-        project_code: form.get("project_code"), project_name: form.get("project_name"), description: form.get("description") || "",
-      }));
-      formElement.reset();
-      onNotice(`已建立课题“${project.project_name}”。`);
-      await onProjectChange(project.id);
-    } catch (error) {
-      onNotice(error.message);
-    }
-  }
-
-  async function addMember() {
-    if (!candidateUsername || !selectedProjectId) return;
-    try {
-      await request(`/api/projects/${selectedProjectId}/members/${encodeURIComponent(candidateUsername)}`, jsonRequest("PUT", { member_role: "researcher" }));
-      setCandidateUsername("");
-      await Promise.all([loadMembers(selectedProjectId), loadDirectory()]);
-      onNotice("科研人员已加入当前课题，权限操作已记录。 ");
-    } catch (error) {
-      onNotice(error.message);
-    }
-  }
-
-  async function removeMember(username) {
-    try {
-      await request(`/api/projects/${selectedProjectId}/members/${encodeURIComponent(username)}`, { method: "DELETE" });
-      await Promise.all([loadMembers(selectedProjectId), loadDirectory()]);
-      onNotice("已移除课题成员，历史会话仍归原账号且不会转给其他账号。 ");
-    } catch (error) {
-      onNotice(error.message);
-    }
-  }
 
   async function toggleAccount(account) {
     try {
@@ -540,17 +482,11 @@ function ProjectAdministration({ platformContext, onProjectChange, onNotice }) {
     }
   }
 
-  const selectedProject = projects.find((item) => item.id === selectedProjectId);
-  const availableResearchers = accounts.filter((account) => account.business_role === "researcher" && account.active && !members.some((member) => member.username === account.username));
   const roleNames = { researcher: "科研人员", data_processor: "数据处理员", field_admin: "字段管理员" };
-  const actionNames = { project_created: "创建课题", project_updated: "修改课题", project_member_added: "添加成员", project_member_updated: "修改成员", project_member_removed: "移除成员", account_activated: "启用账号", account_deactivated: "停用账号" };
-  return <div className="page-stack project-admin-page">
-    <section className="panel"><PanelTitle icon={UsersRound} title="云南省农业科学院课题与账号目录" note="机构固定为云南省农业科学院。科研人员按课题成员关系访问；数据处理员和字段管理员按岗位进入课题，所有变更均留痕。" />
-      <div className="project-admin-grid"><form className="project-create-form" onSubmit={createProject}><h3>建立课题</h3><input name="project_code" required placeholder="课题编号，例如 YNAAS-2026-01" /><input name="project_name" required placeholder="课题名称" /><textarea name="description" placeholder="研究目标或数据范围" /><button className="primary-button" type="submit"><Plus size={16} />建立课题</button></form>
-      <div className="project-member-panel"><h3>课题成员</h3><label>管理课题<select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>{projects.map((project) => <option value={project.id} key={project.id}>{project.project_code} · {project.project_name}</option>)}</select></label><div className="member-add-row"><select value={candidateUsername} onChange={(event) => setCandidateUsername(event.target.value)}><option value="">选择科研人员</option>{availableResearchers.map((account) => <option value={account.username} key={account.username}>{account.display_name} · {account.username}</option>)}</select><button className="secondary-button" type="button" disabled={!candidateUsername} onClick={addMember}>加入课题</button></div><div className="member-list">{members.length ? members.map((member) => <div key={member.id}><span><strong>{member.display_name}</strong><small>{member.username}</small></span><button className="text-button danger" onClick={() => removeMember(member.username)}>移除</button></div>) : <p>当前课题尚未配置科研人员。</p>}</div><small className="project-access-note">当前：{selectedProject?.project_name || "—"}；成员只能读取本课题数据及自己的私人会话。</small></div></div>
-    </section>
-    <section className="panel"><PanelTitle icon={UserRoundCog} title="三类业务账号" note="身份和角色由 Keycloak 统一认证；这里维护云南省农业科学院应用访问状态，不保存或重置密码。" /><div className="table-scroll"><table><thead><tr><th>账号</th><th>姓名</th><th>业务角色</th><th>身份绑定</th><th>应用状态</th><th>操作</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.username}><td>{account.username}</td><td>{account.display_name}</td><td>{roleNames[account.business_role] || account.business_role}</td><td>{account.identity_bound ? "已登录绑定" : "待首次登录"}</td><td>{account.active ? "启用" : "停用"}</td><td><button className={`text-button ${account.active ? "danger" : ""}`} onClick={() => toggleAccount(account)}>{account.active ? "停用" : "启用"}</button></td></tr>)}</tbody></table></div></section>
-    <section className="panel"><PanelTitle icon={ListChecks} title="权限操作记录" note="记录课题创建、成员变更和账号启停，便于验收与追溯。" /><div className="table-scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>对象</th><th>课题</th></tr></thead><tbody>{audits.length ? audits.map((audit) => <tr key={audit.id}><td>{new Date(audit.created_at).toLocaleString("zh-CN")}</td><td>{audit.actor_name}</td><td>{actionNames[audit.action] || audit.action}</td><td>{audit.target_id}</td><td>{projects.find((project) => project.id === audit.project_id)?.project_name || "全局账号"}</td></tr>) : <EmptyRow colSpan={5} text="暂无权限变更记录。" />}</tbody></table></div></section>
+  const actionNames = { account_activated: "启用账号", account_deactivated: "停用账号" };
+  return <div className="page-stack account-admin-page">
+    <section className="panel"><PanelTitle icon={UserRoundCog} title="云南省农业科学院账号目录" note="身份和角色由 Keycloak 统一认证；获批科研人员可访问院内已发布数据，私人会话和附件仍按账号隔离。此处只维护应用访问状态，不保存或重置密码。" /><div className="table-scroll"><table><thead><tr><th>账号</th><th>姓名</th><th>业务角色</th><th>身份绑定</th><th>应用状态</th><th>操作</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.username}><td>{account.username}</td><td>{account.display_name}</td><td>{roleNames[account.business_role] || account.business_role}</td><td>{account.identity_bound ? "已登录绑定" : "待首次登录"}</td><td>{account.active ? "启用" : "停用"}</td><td><button className={`text-button ${account.active ? "danger" : ""}`} onClick={() => toggleAccount(account)}>{account.active ? "停用" : "启用"}</button></td></tr>)}</tbody></table></div></section>
+    <section className="panel"><PanelTitle icon={ListChecks} title="账号操作记录" note="记录应用账号启停，便于验收与追溯。" /><div className="table-scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>账号</th></tr></thead><tbody>{audits.length ? audits.map((audit) => <tr key={audit.id}><td>{new Date(audit.created_at).toLocaleString("zh-CN")}</td><td>{audit.actor_name}</td><td>{actionNames[audit.action] || audit.action}</td><td>{audit.target_id}</td></tr>) : <EmptyRow colSpan={4} text="暂无账号操作记录。" />}</tbody></table></div></section>
   </div>;
 }
 
@@ -668,7 +604,7 @@ function TemplateCenter({ templates, requests, createTemplateVersion }) {
   const kindLabel = { identifier: "业务标识", basic: "基础字段", attribute: "属性字段", trait: "性状字段" };
   const templateCards = (items) => items.map((item) => <button key={item.id} className={selectedTemplate?.id === item.id ? "template-card selected" : "template-card"} onClick={() => setSelectedTemplateId(item.id)}><span>{item.data_scope}</span><strong>{item.template_name}</strong><small>{item.current_version} · 目标表：{item.target_table}</small><p>{item.description}</p></button>);
   return <div className="page-stack template-admin-page">
-    <section className="panel template-admin-intro"><PanelTitle icon={ShieldCheck} title="六套结构化模板已恢复" note="模板统一服务云南省农业科学院，用于管理语义字段、别名、必填规则和版本；具体业务数据仍按当前课题归属。" /><div className="template-group-stats"><span>结构化治理模板 <strong>{structuredTemplates.length}</strong></span><span>兼容导入模板 <strong>{compatibilityTemplates.length}</strong></span></div></section>
+    <section className="panel template-admin-intro"><PanelTitle icon={ShieldCheck} title="六套结构化模板已恢复" note="模板统一服务云南省农业科学院，用于管理语义字段、别名、必填规则和版本；业务数据归属于云南省农业科学院。" /><div className="template-group-stats"><span>结构化治理模板 <strong>{structuredTemplates.length}</strong></span><span>兼容导入模板 <strong>{compatibilityTemplates.length}</strong></span></div></section>
     <section className="template-group"><header><strong>结构化治理模板</strong><span>种质、系谱、试验、单株、基因型与知识文献</span></header><div className="template-grid">{templateCards(structuredTemplates)}</div></section>
     {compatibilityTemplates.length > 0 && <details className="template-compatibility"><summary>兼容导入模板 · {compatibilityTemplates.length} 套（现有网页、Excel 与 CSV 导入继续使用）</summary><div className="template-grid">{templateCards(compatibilityTemplates)}</div></details>}
     {selectedTemplate && <section className="panel"><PanelTitle icon={SlidersHorizontal} title={`${selectedTemplate.template_name} · ${selectedTemplate.current_version}`} note={selectedTemplate.change_summary || "已发布模板"} />

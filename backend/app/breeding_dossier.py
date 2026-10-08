@@ -383,7 +383,7 @@ def seed_mock_breeding_dossiers(session: Session, project_id: str = DEFAULT_PROJ
         "name": MOCK_PROGRAM_NAME,
         "target": "面向江西中籼稻区的高产稳产、较好米质、较低穗瘟与倒伏风险组合筛选。",
         "zone": "赣北平原稻作区、赣东丘陵稻作区、赣南丘陵双季稻区",
-        "unit": "云南省农业科学院隆耘平台演示课题组",
+        "unit": "云南省农业科学院水稻育种研究",
         "description": "该项目、系谱、世代和选择记录均为系统演示模拟数据；仅用于展示审定辅助材料的数据组织方式。",
     })
 

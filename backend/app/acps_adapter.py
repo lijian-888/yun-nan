@@ -807,7 +807,7 @@ class AcpsDirectLeaderRuntime:
         # Deliberately return the same error for missing and foreign tasks so a
         # researcher cannot use this endpoint to enumerate another user's IDs.
         if not binding or binding.owner_id != owner_id or binding.project_id != project_id:
-            raise LookupError("未找到当前账号在本课题创建的 ACPs Direct 任务。")
+            raise LookupError("未找到当前账号创建的 ACPs Direct 任务。")
         binding.touched_at = datetime.now(timezone.utc)
         return binding
 
@@ -960,7 +960,7 @@ class AcpsGroupLeaderRuntime:
         leader = await self._get_leader()
         owner = self._owners.get(session_id)
         if owner != AcpsGroupOwner(owner_id=owner_id, project_id=project_id):
-            raise LookupError("未找到当前账号在本课题创建的 ACPs Group 会话。")
+            raise LookupError("未找到当前账号创建的 ACPs Group 会话。")
         if session_id not in leader.group_sessions:
             self._owners.pop(session_id, None)
             raise LookupError("ACPs Group 会话已过期或运行时已重启，请重新建组。")

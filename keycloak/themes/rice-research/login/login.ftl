@@ -59,7 +59,7 @@
         <div class="sign-in-heading">
           <p>安全登录</p>
           <h2>进入科研工作台</h2>
-          <span>使用云南省农业科学院分配账号访问已授权课题的数据与工具。</span>
+          <span>使用云南省农业科学院分配账号访问院内已发布数据与科研工具。</span>
         </div>
 
         <#if message?has_content>

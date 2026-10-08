@@ -1,0 +1,55 @@
+# 172.16.123.193 云南试用版隔离部署
+
+此配置专用于与小亿、隆耘同机的试用版。它使用独立 Compose 项目 `ynaas-trial`、独立 Docker 网络和数据卷、独立镜像名，以及未被现有服务占用的 HTTPS 端口 `19443`。PostgreSQL、API、Keycloak、MinIO 和解析服务不发布主机端口。首期基因型导入 Worker 不启动；现有基因数据查询不依赖这个 Worker。
+
+云南试用版业务上不设课题：获批且未停用的账号直接进入院内统一工作台。旧数据库中的默认 `project_id` 仅作内部 RLS/存储兼容标识，不要求新科研账号拥有 `project_member` 记录，也不在网页上显示课题选择。既有成员记录保留，不执行删表或数据迁移。
+
+**重要：不能直接使用仓库根目录的 `docker-compose.lan.yml` 单独上线。** 该文件默认创建 `rice_demo` 演示库；本覆盖文件将数据库改为 `ynaas_rice_ai`。2026-10-08 已经完成经授权的数据库迁移和核验，但这不等于四项业务功能均已完成验收。
+
+## 上线前需要确认
+
+1. 农科院允许将哪些真实数据复制到公司 193 服务器。用户已确认现有真实数据库可以迁移；测序文件、基因组大文件和数据库外的敏感附件尚未纳入本次迁移。
+2. 模型 API 的服务商、模型名、服务器端密钥，以及哪些数据允许发送至外部模型。现有代码会拦截带私密标记的附件出站，但试用前仍须完成实际策略验收。
+3. 试用入口是否可以使用自签名 IP 证书。正式对外使用时应改由可信 CA 或公司内网 CA 签发证书。
+4. 数据库迁移方式及备份位置；源库和目标库均先做备份，再执行恢复。禁止把数据库口令或转储文件加入 Git。
+
+迁移验收时，在源库与目标库分别执行 `verify-table-counts.sql`：表数量、总行数和逐表行数指纹均须一致，再允许 API 首次启动。该脚本只读业务表，不展示行内容。目标库启动后的应用维护可能变更 `public` 系统表，因此应在启动 API 前比较。
+
+## 部署参数
+
+- 路径建议：`/home/lijian/apps/ynaas-trial`（位于容量充足的 `/home` 分区）。
+- 入口：`https://172.16.123.193:19443`；防火墙放行与否由管理员决定。
+- Compose 文件：`docker-compose.lan.yml` + `deploy/ynaas-193/compose.override.yml`。
+- 数据库镜像固定为与当前源库一致的 PostgreSQL 16 + pgvector 0.8.6；版本变更需先验证备份恢复兼容性。
+- 环境文件：`deploy/ynaas-193/.env`，由 `env.example` 复制并填写，`chmod 600`，绝不提交。
+- 资源上限：默认启动服务的内存上限合计约 10.4 GiB，CPU 配额合计 9.75 核；这是上限，不是常驻占用。共享主机仍需观察真实负载。这个限额优先保障四项试用功能，不承诺大文件 OCR/批量解析性能。
+
+## 仅检查配置，不启动容器
+
+在仓库根目录执行：
+
+```bash
+bash deploy/ynaas-193/prepare.sh
+bash deploy/compose.sh --env-file deploy/ynaas-193/.env \
+  -f docker-compose.lan.yml -f deploy/ynaas-193/compose.override.yml config -q
+```
+
+`prepare.sh` 只可首次执行：自动生成独立随机口令与含 IP SAN 的自签名证书，不启动容器，也不填模型 API 密钥；重复执行会拒绝覆盖既有口令或证书。自签名证书会引起浏览器安全提示，仅适用于经同意的内部试用。
+
+本次 2026-10-08 快照完成加密传输和 SHA-256 校验、目标库确认为空、镜像 pgvector 版本为 0.8.6 后，可执行 `bash deploy/ynaas-193/restore-20261008.sh`。脚本遇到任一错误即停止，不清理、不覆盖已有业务表；完成后核对源/目标的逐表行数指纹。
+
+检查通过、完成数据迁移后可启动基础服务；模型密钥可以后配，但缺失时不能把自然语言分析和推荐称为可用。不能对整台主机运行 `docker system prune` 或 `docker volume prune`；不能对小亿、隆耘的 Compose 项目执行 `down`。本项目将来停止时必须带上上述两个 Compose 文件和专用环境文件，且不要添加 `-v`。
+
+## 2026-10-08 部署记录
+
+- 官方 `pgvector/pgvector:0.8.6-pg16` 在 Docker Hub 直拉缓慢。通过 DaoCloud 公共镜像前缀按官方 linux/amd64 内容摘要拉取，再在本机标记为官方仓库标签；没有修改整机 Docker 镜像源，也没有重启其他项目。复现命令：
+
+  ```bash
+  docker pull m.daocloud.io/docker.io/pgvector/pgvector@sha256:eac621400b7b7ff52493883e41e930e3d104695fea5b68cc0c42370cf7880067
+  docker tag m.daocloud.io/docker.io/pgvector/pgvector@sha256:eac621400b7b7ff52493883e41e930e3d104695fea5b68cc0c42370cf7880067 pgvector/pgvector:0.8.6-pg16
+  ```
+
+  拉取后核验了 `linux/amd64`、PostgreSQL 16.15 和 pgvector 0.8.6。其他构建基础镜像也使用相同的按官方摘要拉取、服务器本地标记方式；本项目镜像均使用 `ynaas-trial-*` 名称。
+- 数据库快照 SHA-256：`9413f30994b1640d14b24a5a90e628a103c715278029b71dd9988e06a96626d5`。恢复前后均核对 133 张业务表、5,348,678 行，逐表行数指纹 `9b28e0a43b3bd4b890660f05c14007ee`。服务器原始备份保存在 `/home/lijian/apps/ynaas-trial-data-import/`，未加入 Git。
+- `ynaas-trial` 的数据库、MinIO、解析服务、API、Web 和网关健康；Keycloak 登录页可访问。公司内网入口 `https://172.16.123.193:19443`；自签名证书会出现浏览器警告。验证了网页、`/api/health` 和 OIDC 发现接口返回 HTTP 200。
+- 本次没有填写模型 API 密钥，也没有进行模型调用；自然语言问答、五性分析与亲本推荐不能据此认定为可交付状态。后续还需逐项开发和业务验收。

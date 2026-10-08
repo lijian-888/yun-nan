@@ -373,7 +373,7 @@ function StructuredQueryPanel({ onNotice }) {
   </section>;
 }
 
-export default function ResearchAssistant({ platformContext, onProjectChange }) {
+export default function ResearchAssistant({ platformContext }) {
   const [user, setUser] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState("");
@@ -828,7 +828,7 @@ export default function ResearchAssistant({ platformContext, onProjectChange }) 
   return <div className="research-shell">
     <aside className="research-sidebar">
       <div className="research-brand"><div className="research-brand-mark brand-logo-mark" aria-hidden="true"><img src="/brand/longyun-agent-logo.png" alt="" /></div><div><strong>{AGENT_NAME}</strong><span>已发布标准数据 + 大模型</span></div></div>
-      <section className="research-project-context" aria-label="当前云南省农业科学院课题"><span>{platformContext?.institution?.name || "云南省农业科学院"}</span><label>当前课题<select value={platformContext?.active_project_id || ""} onChange={(event) => onProjectChange?.(event.target.value)}>{(platformContext?.projects || []).map((project) => <option value={project.id} key={project.id}>{project.project_name}</option>)}</select></label></section>
+      <section className="research-project-context" aria-label="当前机构"><span>{platformContext?.institution?.name || "云南省农业科学院"}</span></section>
       <nav className="research-workspaces" aria-label="科研工作台">
         <section className="research-workspace-group" aria-label="对话">
           <small>对话</small>
@@ -858,11 +858,11 @@ export default function ResearchAssistant({ platformContext, onProjectChange }) 
     </aside>
 
     <main className={`research-main ${workspace === "knowledge" ? "knowledge-main" : workspace === "structured" ? "structured-main" : workspace === "gwas" ? "gwas-main" : workspace === "genotype" ? "genotype-main" : workspace === "skills" ? "skills-main" : workspace === "results" ? "results-main" : workspace === "intelligence" || workspace === "trial-analysis" ? "intelligence-main" : ""}`}>
-      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {platformContext?.projects?.find((project) => project.id === platformContext.active_project_id)?.project_name || "课题工作区"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "私有基因型数据" : "仅查询已发布标准数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : "结构化查询"}</h1></div></header>}
+      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "私有基因型数据" : "仅查询院内已发布数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : "结构化查询"}</h1></div></header>}
 
       {notice && <div className="assistant-notice"><span>{notice}</span><button title="关闭提示" onClick={() => setNotice("")}><X size={16} /></button></div>}
 
-      {workspace === "assistant" && <section className="assistant-boundary"><ShieldCheck size={18} /><span>仅使用当前有权课题的已发布标准数据；私有附件和会话同时按课题与登录账号隔离。涉及病虫害、农药、施肥或种植建议时，结果需结合当地要求和专业人员意见确认。</span></section>}
+      {workspace === "assistant" && <section className="assistant-boundary"><ShieldCheck size={18} /><span>院内已发布标准数据供获批人员查询；私有附件和会话按登录账号隔离。涉及病虫害、农药、施肥或种植建议时，结果需结合当地要求和专业人员意见确认。</span></section>}
 
       {workspace === "assistant" ? <>
       <div className="chat-pane">

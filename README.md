@@ -41,9 +41,9 @@ Copy-Item keycloak/rice-research-realm.json.example keycloak/rice-research-realm
 
 示例内预置科研人员 `ynaas.researcher`、数据处理员 `ynaas.processor`、字段管理员 `ynaas.fieldadmin` 三类账号。占位密码只能用于初始化，启动前必须分别替换；所有账号首次登录也应修改密码。科研人员具有“已发布标准数据”的只读查询能力，但会话、上传附件、解析文本和压缩上下文严格隔离。数据处理员不能修改标准模板；字段管理员不能导入、审核或发布业务数据。
 
-## 机构与课题边界
+## 云南试用版访问边界
 
-云南省农业科学院是默认机构，用户不需要创建、选择或切换机构。机构归属由受控的账号目录预先配置，登录时不会被请求参数或页面表单改写；每个账号只能进入所属机构及其有权课题。数据接入层可为每个已配置机构建立私有 MinIO Bucket 和独立 PostgreSQL 业务数据库，并在数据记录中继续保留 `institution_id`、`project_id` 和实体标识。当前原生数据库共存初始化默认关闭该独立数据平面，避免在未配置 MinIO 时另建数据库。详见 [云南原生 PostgreSQL 初始化说明](docs/YUNNAN-BOOTSTRAP.md)。
+云南省农业科学院是唯一机构。试用版不向用户提供课题选择或课题成员管理：经管理员批准、具有业务角色且未停用的账号，直接进入院内工作台；科研人员共同查询院内已发布数据，私人会话、附件和私人知识库仍按登录账号隔离。现有 `project_id` 暂保留为固定的内部数据隔离标识，不接受浏览器指定其他工作区，也不要求新科研账号加入课题。机构级数据接入模式当前默认关闭，避免在未配置 MinIO 时另建数据库。详见 [云南原生 PostgreSQL 初始化说明](docs/YUNNAN-BOOTSTRAP.md)。
 
 ## 云南原生 PostgreSQL 初始化
 
@@ -53,7 +53,7 @@ Copy-Item keycloak/rice-research-realm.json.example keycloak/rice-research-realm
 .\scripts\bootstrap-yunnan.ps1
 ```
 
-脚本从本机私密 JSON 文件读取数据库与应用角色凭据，不在命令行或输出中显示密码；执行前后逐表比较所有非 `public` 表的精确行数，并拒绝连接非 `ynaas_rice_ai` 数据库。默认只创建表、视图、索引、约束、RLS、云南机构/默认课题/三类账号目录、标准模板和知识分类，不导入任何历史演示业务数据。只有明确需要隔离演示环境时才能显式使用 `-IncludeDemoData`。
+脚本从本机私密 JSON 文件读取数据库与应用角色凭据，不在命令行或输出中显示密码；执行前后逐表比较所有非 `public` 表的精确行数，并拒绝连接非 `ynaas_rice_ai` 数据库。默认只创建表、视图、索引、约束、RLS、云南机构/内部固定工作区/三类账号目录、标准模板和知识分类，不导入任何历史演示业务数据。只有明确需要隔离演示环境时才能显式使用 `-IncludeDemoData`。
 
 Docker Desktop 可用后，执行云南专用完整运行入口：
 
@@ -105,10 +105,10 @@ docker compose --profile warmup run --rm model-warmup
 
 - Keycloak 负责真实登录、角色与 Token 签发；前端只携带短期 Bearer Token。
 - API 使用非超级用户 `rice_app` 连接 PostgreSQL；迁移与建表使用独立的 bootstrap 账号。
-- `research_session`、`research_message`、`research_attachment`、`research_audit`、`research_result` 同时按课题和登录账号启用并强制 PostgreSQL RLS。即使有人篡改会话 ID，也无法读取其他课题或其他研究人员的私有内容。
-- `knowledge_folder`、`knowledge_document`、`knowledge_chunk` 同样按课题启用并强制 PostgreSQL RLS。私有知识库只能由资料所有者访问；研究人员只能检索当前课题已发布的公共资料，字段管理员才可核验、发布和撤回公共资料。
-- 品种、表型、原始来源、区域试验、GWAS、基因型资产、知识、任务和成果均带 `project_id`；新数据归入云南省农业科学院有权课题。
-- 六类统一导入的原始文件进入所属机构私有 MinIO Bucket，结构化实体和关联进入所属机构独立业务数据库；API 仍按账号机构和当前课题双重校验。
+- `research_session`、`research_message`、`research_attachment`、`research_audit`、`research_result` 仍强制 PostgreSQL RLS，私人内容按已验证的登录账号隔离；内部固定标识继续用于兼容现有存储结构。
+- `knowledge_folder`、`knowledge_document`、`knowledge_chunk` 同样强制 RLS。私有知识库只能由资料所有者访问；研究人员只能检索院内已发布的公共资料，字段管理员才可核验、发布和撤回公共资料。
+- 品种、表型、原始来源、区域试验、GWAS、基因型资产、知识、任务和成果暂保留 `project_id` 字段；云南试用版统一使用固定内部值，不对用户暴露。
+- 六类统一导入的原始文件进入所属机构私有 MinIO Bucket，结构化实体和关联进入所属机构独立业务数据库；API 按账号机构校验，不允许浏览器选择其他内部工作区。
 - 私有附件存入本地 Docker 卷，不提供对浏览器的直接文件路径访问；删除会话会一并删除附件、解析文本和压缩上下文。
 
 ## 说明

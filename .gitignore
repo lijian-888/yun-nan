@@ -21,6 +21,8 @@ data/research/
 !.env.example
 !deploy/.env.lan.example
 !deploy/.env.production.example
+deploy/ynaas-193/.env
+deploy/ynaas-193/certs/
 *.pfx
 *.p12
 *.pem
