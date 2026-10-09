@@ -54,8 +54,14 @@ class ApprovalLookupIntegrationTests(unittest.TestCase):
     def test_missing_approval_does_not_borrow_other_province_value(self):
         with Session(self.engine) as session:
             result = lookup_numeric_trait(session, "D优130四川2003年审定的直链淀粉含量是多少？")
-            self.assertIn("未收录", result["content"])
+            self.assertIn("未找到", result["content"])
             self.assertNotIn("24.1%", result["content"])
+
+    def test_malformed_source_number_is_flagged_for_review(self):
+        with Session(self.engine) as session:
+            result = lookup_numeric_trait(session, "徐稻3号（徐91069）的每穗实粒数是多少？")
+            self.assertIn("人工核对", result["content"])
+            self.assertIn("每穗实粒数粒120粒", result["content"])
 
     def test_yield_text_only_metric(self):
         with Session(self.engine) as session:

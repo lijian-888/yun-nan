@@ -247,10 +247,42 @@ def lookup_numeric_trait(
     label = _approval_label(approval)
     source_url = variety.get("source_url")
     if not facts:
+        raw_sections = _rows(session, """
+            SELECT a.yield_performance_text, a.cultivation_text,
+                   a.suitable_area_text, a.approval_opinion_text,
+                   s.characteristics_raw_text
+            FROM ricedata.rice_variety_approval a
+            LEFT JOIN ricedata.rice_variety_trait_summary s ON s.approval_id = a.approval_id
+            WHERE a.approval_id = :approval_id LIMIT 5
+        """, {"approval_id": approval["approval_id"]})
+        possible_raw: list[str] = []
+        for section in raw_sections:
+            for field, raw in section.items():
+                if not raw:
+                    continue
+                for alias in sorted(spec.aliases, key=len, reverse=True):
+                    at = raw.find(alias)
+                    if at >= 0:
+                        source_name = {"yield_performance_text": "产量表现",
+                                       "characteristics_raw_text": "特征特性",
+                                       "cultivation_text": "栽培技术要点",
+                                       "suitable_area_text": "适宜地区",
+                                       "approval_opinion_text": "审定意见"}.get(field, field)
+                        possible_raw.append(f"{source_name}：{raw[max(0, at - 35):at + 130].strip()}")
+                        break
+        if possible_raw:
+            detail = ("原文提到了该指标，但自动抽取未得到可靠的结构化数值；请人工核对以下原文，"
+                      "不能把其中疑似数字直接当作已确认结果：\n\n" +
+                      "\n".join(f"- {item}" for item in possible_raw[:3]))
+        else:
+            detail = "本地该条审定记录的已结构化数据及已保存原文中均未检索到该指标数值。"
         return _outcome(
-            f"**{variety['variety_name']} · {label}**：本地该条审定记录未收录“{spec.name}”的可核对数值。"
-            "不能用其他省份或年份的数值代替。" + (f"\n\n[查看原始品种页面]({source_url})" if source_url else ""),
-            evidence=[{"type": "ricedata_trait", "title": label, "detail": "未收录该指标；未跨审定记录借值。", "priority": 1}],
+            f"**{variety['variety_name']} · {label}**：未找到“{spec.name}”的已结构化可核对数值。"
+            f"\n\n{detail}\n\n不能用其他省份或年份的数值代替。" +
+            (f"\n\n[查看原始品种页面]({source_url})" if source_url else ""),
+            evidence=[{"type": "ricedata_trait", "title": label,
+                       "detail": "原文待人工核对。" if possible_raw else "该审定记录未检索到该指标；未跨审定记录借值。",
+                       "priority": 1}],
         )
     lines: list[str] = []
     evidence: list[dict] = []
