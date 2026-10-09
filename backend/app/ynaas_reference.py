@@ -19,6 +19,10 @@ REFERENCE_TABLES: dict[str, tuple[str, ...]] = {
     "ricedata": (
         "rice_variety",
         "rice_variety_approval",
+        "rice_variety_trait_summary",
+        "rice_variety_trait_measurement",
+        "rice_variety_narrative_fact",
+        "rice_variety_yield_observation",
         "rice_pedigree_snapshot",
         "rice_pedigree_node",
         "rice_pedigree_edge",

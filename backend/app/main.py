@@ -153,6 +153,7 @@ from .ai_gateway import (
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
 from .research_search import build_public_web_context, requested_public_pages, resolve_public_request, search_public_references
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
+from .ricedata_trait_lookup import lookup_numeric_trait
 from .breeding_dossier import (
     BreedingDossierError,
     build_breeding_report_context,
@@ -6809,6 +6810,104 @@ async def research_chat_stream(
             )
     if existing_task and existing_task.status in {"queued", "running"}:
         raise HTTPException(409, f"相同幂等键对应的 AI 任务仍为 {existing_task.status}，不会重复创建任务。")
+    # A specific RiceData metric is a database fact, not a generative answer.
+    # Resolve approval ambiguity in the conversation before presenting a value.
+    if not payload.attachment_ids:
+        trait_history = session.scalars(
+            select(ResearchMessage)
+            .where(ResearchMessage.session_id == research_session_id)
+            .order_by(ResearchMessage.created_at.desc(), ResearchMessage.id.desc())
+            .limit(8)
+        ).all()
+        if existing_task and existing_task.request_message_id:
+            trait_history = [item for item in trait_history if item.id != existing_task.request_message_id]
+        trait_result = lookup_numeric_trait(session, payload.content.strip(), trait_history)
+        if trait_result is not None:
+            automatic_title = auto_title_for_first_message(
+                research_session.title, payload.content, has_messages=bool(trait_history),
+            )
+            if automatic_title:
+                research_session.title = automatic_title
+            now = datetime.now(timezone.utc)
+            research_session.updated_at = now
+            user_message = (
+                session.get(ResearchMessage, existing_task.request_message_id)
+                if existing_task and existing_task.request_message_id else None
+            )
+            if not user_message:
+                user_message = ResearchMessage(
+                    session_id=research_session_id,
+                    project_id=research_session.project_id,
+                    owner_id=user.id,
+                    role="user",
+                    content=payload.content.strip(),
+                    evidence=[],
+                    operation_state=[{"state": "accepted", "label": "已接收指标查询"}],
+                )
+                session.add(user_message)
+                session.flush()
+            task = existing_task or AIGatewayTask(
+                institution_id=account.institution_id,
+                project_id=research_session.project_id,
+                owner_id=user.id,
+                session_id=research_session_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                provider="local_database",
+                model="ricedata_trait_lookup",
+            )
+            task.provider = "local_database"
+            task.model = "ricedata_trait_lookup"
+            task.status = "completed"
+            task.egress_classification = "local_only"
+            task.redaction_count = 0
+            task.request_message_id = user_message.id
+            task.started_at = now
+            task.completed_at = now
+            task.error_code = None
+            task.error_message = None
+            session.add(task)
+            session.flush()
+            operation_state = [{"state": "completed", "label": "已按品种、审定记录和原始文本完成数据库查询"}]
+            if trait_result.get("pending"):
+                operation_state.append(trait_result["pending"])
+            assistant_message = ResearchMessage(
+                session_id=research_session_id,
+                project_id=research_session.project_id,
+                owner_id=user.id,
+                role="assistant",
+                content=trait_result["content"],
+                evidence=trait_result["evidence"],
+                operation_state=operation_state,
+            )
+            session.add(assistant_message)
+            session.flush()
+            task.result_message_id = assistant_message.id
+            session.add(ResearchAudit(
+                owner_id=user.id,
+                project_id=research_session.project_id,
+                session_id=research_session_id,
+                action="ricedata_trait_lookup_completed",
+                audit_metadata={
+                    "task_id": task.id,
+                    "clarification_requested": bool(trait_result.get("pending")),
+                    "evidence_count": len(trait_result["evidence"]),
+                },
+            ))
+            _record_ai_audit(session, task, "local_database_completed", "completed")
+            response_message = serialize_research_message(assistant_message)
+            session.commit()
+
+            async def stream_trait_result() -> Any:
+                if automatic_title:
+                    yield sse_event("session_title", {"session_id": research_session_id, "title": automatic_title})
+                yield sse_event("status", {"label": "已核对本地品种及审定指标", "task_id": task.id})
+                yield sse_event("complete", {"message": response_message, "task_id": task.id})
+
+            return StreamingResponse(
+                stream_trait_result(), media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
     breeding_report_requested = is_breeding_report_request(payload.content)
     report_requested = is_report_request(payload.content) or breeding_report_requested
     breeding_report_context: dict[str, Any] | None = None
