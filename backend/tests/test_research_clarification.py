@@ -30,6 +30,13 @@ class ResearchClarificationTests(unittest.TestCase):
             self.assertIn("哪些数据", followup["question"])
             self.assertNotIn("请指定其中一条", followup["question"])
 
+    def test_short_canonical_name_is_preserved_in_clarification(self):
+        with Session(self.engine) as session:
+            result = clarification_for_question(session, "国稻3号的表型数据给我一下")
+            self.assertEqual(result["variety_id"], 42583)
+            self.assertIn("国稻3号", result["question"])
+            self.assertNotIn("**3号**", result["question"])
+
     def test_precise_metric_and_named_overview_do_not_get_interrupted(self):
         with Session(self.engine) as session:
             self.assertIsNone(clarification_for_question(session, "D优130的直链淀粉含量是多少？"))

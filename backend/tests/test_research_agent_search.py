@@ -34,9 +34,19 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 result = await agent._native_public_evidence_answer(api_key="test", base_url="https://model.example", model_name="test", user_prompt="搜索", evidence_context="", public_web_context=CONTEXT)
             self.assertIsNone(result)
 
+    async def test_verified_evidence_recovery_rejects_placeholder(self):
+        client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
+            200, json={"choices": [{"message": {"content": "..."}}]})))
+        with patch("httpx.AsyncClient", return_value=client):
+            result = await agent._native_verified_evidence_answer(
+                api_key="test", base_url="https://model.example", model_name="test",
+                user_prompt="国稻3号的表型数据", evidence_context="verified", ynaas_database_context="database")
+        self.assertIsNone(result)
+
 
 class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
-    async def run_reply(self, context, native_answer=None, reasoning_timeout=False):
+    async def run_reply(self, context, native_answer=None, reasoning_timeout=False,
+                        verified_context="", verified_answer=None):
         self.model_kwargs = []
         class Msg:
             def __init__(self, name, content, role):
@@ -72,8 +82,8 @@ class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
             module = types.ModuleType(name)
             module.__dict__.update(values)
             modules[name] = module
-        with patch.dict(sys.modules, modules), patch.dict(os.environ, {"AI_PROVIDER": "cherryin", "YUNNAN_API_KEY": "test"}), patch.object(agent, "_build_react_toolkit", side_effect=toolkit), patch.object(agent, "_execute_controlled_react_action", new=AsyncMock()), patch.object(agent, "_native_public_evidence_answer", new=AsyncMock(return_value=native_answer)):
-            return [event async for event in agent.stream_research_reply(user_prompt="找到赣晚籼35号", evidence_context="", memory_state={}, public_web_context=context)]
+        with patch.dict(sys.modules, modules), patch.dict(os.environ, {"AI_PROVIDER": "cherryin", "YUNNAN_API_KEY": "test"}), patch.object(agent, "_build_react_toolkit", side_effect=toolkit), patch.object(agent, "_execute_controlled_react_action", new=AsyncMock()), patch.object(agent, "_native_public_evidence_answer", new=AsyncMock(return_value=native_answer)), patch.object(agent, "_native_verified_evidence_answer", new=AsyncMock(return_value=verified_answer)):
+            return [event async for event in agent.stream_research_reply(user_prompt="找到赣晚籼35号", evidence_context=verified_context, memory_state={}, public_web_context=context)]
 
     async def test_cherryin_uses_non_streaming_agentscope_parser(self):
         await self.run_reply(CONTEXT)
@@ -114,6 +124,16 @@ class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
     async def test_non_web_empty_answers_still_fail(self):
         with self.assertRaises(agent.EmptyResearchAnswerError):
             await self.run_reply("")
+
+    async def test_local_evidence_recovers_blank_react_reply(self):
+        events = await self.run_reply("", verified_context="已核对本地品种审定记录",
+                                      verified_answer="本地记录显示两条审定结果，请分别核对。")
+        self.assertEqual(events[-1]["response_mode"], "verified_evidence_native")
+        self.assertEqual(len(events[-1]["memory_state"]["content"]), 2)
+
+    async def test_local_evidence_does_not_save_second_empty_reply(self):
+        with self.assertRaises(agent.EmptyResearchAnswerError):
+            await self.run_reply("", verified_context="已核对本地品种审定记录")
 
 
 if __name__ == "__main__":

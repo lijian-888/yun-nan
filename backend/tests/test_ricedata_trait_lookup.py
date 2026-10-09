@@ -9,6 +9,7 @@ from app.ricedata_trait_facts import extract_narrative_facts, requested_traits
 from app.ricedata_trait_lookup import (
     _approval_followup, lookup_numeric_trait, variety_context_from_question,
 )
+from app.ricedata_variety_overview import lookup_variety_overview
 
 
 class NarrativeExtractionTests(unittest.TestCase):
@@ -160,6 +161,33 @@ class ApprovalLookupIntegrationTests(unittest.TestCase):
             result = lookup_numeric_trait(session, "D优130的直链淀粉含量是多少？", [previous])
             self.assertIn("闽审稻2006008", result["content"])
             self.assertNotIn("桂审稻200044号", result["content"])
+
+    def test_short_canonical_name_resolves_full_parenthesized_variety(self):
+        with Session(self.engine) as session:
+            self.assertEqual(variety_context_from_question(session, "国稻3号的表型数据给我一下"),
+                             {"state": "ricedata_variety_context", "variety_id": 42583})
+
+    def test_all_phenotype_data_are_grouped_by_approval(self):
+        with Session(self.engine) as session:
+            result = lookup_variety_overview(session, "国稻3号的全部表型数据")
+            self.assertEqual(result["context"]["variety_id"], 42583)
+            self.assertIn("赣审稻2004027", result["content"])
+            self.assertIn("浙审稻2004011", result["content"])
+            self.assertIn("产量表现原文", result["content"])
+            self.assertNotIn("国稻3号的已知平均株高", result["content"])
+
+    def test_all_phenotype_followup_uses_last_resolved_variety(self):
+        previous = SimpleNamespace(role="assistant", content="国稻3号",
+                                   operation_state=[{"state": "ricedata_variety_context", "variety_id": 42583}])
+        with Session(self.engine) as session:
+            result = lookup_variety_overview(session, "那它的全部表型数据", history_items=[previous])
+            self.assertEqual(result["context"]["variety_id"], 42583)
+
+    def test_missing_overview_is_not_replaced_with_a_sample(self):
+        with Session(self.engine) as session:
+            result = lookup_variety_overview(session, "不存在的品种的全部表型数据")
+            self.assertIn("未找到", result["content"])
+            self.assertEqual(result["evidence"], [])
 
 
 if __name__ == "__main__":

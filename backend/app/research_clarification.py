@@ -85,6 +85,7 @@ def clarification_for_question(
             return None
         return {
             "kind": "variety_data",
+            "variety_id": variety_id,
             "question": f"您想查看 **{name}** 的哪些数据？例如株高、结实率、产量或品质；也可以说“全部表型数据”{approval_hint}。不确定时可跳过，我会只概述已有数据并注明审定记录差异。",
         }
     return {

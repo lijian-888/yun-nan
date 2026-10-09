@@ -10,10 +10,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .ricedata_trait_facts import TRAIT_BY_CODE, requested_traits
-from .ynaas_reference import _explicit_name_mention
+from .ricedata_variety_identity import resolve_varieties
 
 
-_SOURCE_ID = re.compile(r"ricedata\.cn/variety/varis/(\d+)\.htm", re.I)
 _YEAR = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 _REGIONS = {
     "四川": ("四川", "川审"), "福建": ("福建", "闽审"), "云南": ("云南", "滇审"),
@@ -46,33 +45,7 @@ def _approval_label(approval: dict) -> str:
 
 
 def _find_varieties(session: Session, question: str) -> list[dict]:
-    source_id = _SOURCE_ID.search(question)
-    if source_id:
-        return _rows(session, """
-            SELECT variety_id, variety_name, source_variety_id, source_url
-            FROM ricedata.rice_variety WHERE source_variety_id = :source_id LIMIT 2
-        """, {"source_id": source_id.group(1)})
-    possible = _rows(session, """
-        SELECT variety_id, variety_name, source_variety_id, source_url,
-               trial_names, former_names
-        FROM ricedata.rice_variety
-        WHERE variety_name IS NOT NULL AND (
-            strpos(lower(:question), lower(variety_name)) > 0 OR
-            EXISTS (SELECT 1 FROM unnest(COALESCE(trial_names, ARRAY[]::text[]) ||
-                       COALESCE(former_names, ARRAY[]::text[])) AS alias_name
-                    WHERE alias_name <> '' AND strpos(lower(:question), lower(alias_name)) > 0)
-        )
-        ORDER BY char_length(variety_name) DESC, variety_id LIMIT 80
-    """, {"question": question})
-    matched = [row for row in possible if any(
-        _explicit_name_mention(question, name)
-        for name in (row["variety_name"], *(row.get("trial_names") or []), *(row.get("former_names") or []))
-    )]
-    if not matched:
-        return []
-    # A longer explicit cultivar name wins over an embedded shorter name.
-    longest = max(len(row["variety_name"]) for row in matched)
-    return [row for row in matched if len(row["variety_name"]) == longest][:8]
+    return resolve_varieties(session, question)
 
 
 def _approval_selection(question: str, approvals: list[dict]) -> list[dict]:

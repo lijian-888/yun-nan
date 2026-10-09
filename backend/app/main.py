@@ -155,6 +155,7 @@ from .research_search import build_public_web_context, requested_public_pages, r
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
 from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_question
 from .research_clarification import clarification_for_question, expanded_question
+from .ricedata_variety_overview import lookup_variety_overview
 from .breeding_dossier import (
     BreedingDossierError,
     build_breeding_report_context,
@@ -6879,7 +6880,17 @@ async def research_chat_stream(
         ).all()
         if existing_task and existing_task.request_message_id:
             trait_history = [item for item in trait_history if item.id != existing_task.request_message_id]
-        trait_result = lookup_numeric_trait(session, payload.content.strip(), trait_history)
+        overview_question = (f"{original_question}\n{clarification_details}"
+                             if payload.clarification_action else display_content)
+        trait_result = lookup_variety_overview(
+            session, overview_question,
+            variety_id=(marker.get("variety_id") if payload.clarification_action
+                        and isinstance(marker.get("variety_id"), int) else None),
+            history_items=trait_history,
+        )
+        is_variety_overview = trait_result is not None
+        if trait_result is None:
+            trait_result = lookup_numeric_trait(session, payload.content.strip(), trait_history)
         if trait_result is not None:
             automatic_title = auto_title_for_first_message(
                 research_session.title, payload.content, has_messages=bool(trait_history),
@@ -6900,7 +6911,8 @@ async def research_chat_stream(
                     role="user",
                     content=display_content,
                     evidence=[],
-                    operation_state=[{"state": "accepted", "label": "已接收指标查询"}, *clarification_resolution_state],
+                    operation_state=[{"state": "accepted", "label": "已接收表型总览查询" if is_variety_overview else "已接收指标查询"},
+                                     *clarification_resolution_state],
                 )
                 session.add(user_message)
                 session.flush()
@@ -6912,10 +6924,10 @@ async def research_chat_stream(
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
                 provider="local_database",
-                model="ricedata_trait_lookup",
+                model="ricedata_variety_overview" if is_variety_overview else "ricedata_trait_lookup",
             )
             task.provider = "local_database"
-            task.model = "ricedata_trait_lookup"
+            task.model = "ricedata_variety_overview" if is_variety_overview else "ricedata_trait_lookup"
             task.status = "completed"
             task.egress_classification = "local_only"
             task.redaction_count = 0
@@ -6947,7 +6959,7 @@ async def research_chat_stream(
                 owner_id=user.id,
                 project_id=research_session.project_id,
                 session_id=research_session_id,
-                action="ricedata_trait_lookup_completed",
+                action="ricedata_variety_overview_completed" if is_variety_overview else "ricedata_trait_lookup_completed",
                 audit_metadata={
                     "task_id": task.id,
                     "clarification_requested": bool(trait_result.get("pending")),
@@ -6961,7 +6973,8 @@ async def research_chat_stream(
             async def stream_trait_result() -> Any:
                 if automatic_title:
                     yield sse_event("session_title", {"session_id": research_session_id, "title": automatic_title})
-                yield sse_event("status", {"label": "已核对本地品种及审定指标", "task_id": task.id})
+                yield sse_event("status", {"label": "已核对本地品种与审定表型" if is_variety_overview
+                                           else "已核对本地品种及审定指标", "task_id": task.id})
                 yield sse_event("complete", {"message": response_message, "task_id": task.id})
 
             return StreamingResponse(
@@ -7030,7 +7043,9 @@ async def research_chat_stream(
                 {"state": "completed", "label": "等待补充研究条件"},
                 {"state": "research_clarification", "kind": clarification["kind"],
                  "question": clarification["question"], "original_question": original_question,
-                 "collected_details": clarification_details, "attempt": clarification_attempt + 1},
+                 "collected_details": clarification_details, "attempt": clarification_attempt + 1,
+                 **({"variety_id": clarification["variety_id"]}
+                    if isinstance(clarification.get("variety_id"), int) else {})},
             ],
         )
         session.add(assistant_message)

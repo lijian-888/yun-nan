@@ -14,6 +14,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .ricedata_variety_identity import explicit_name_mention as _explicit_name_mention
+
 
 REFERENCE_TABLES: dict[str, tuple[str, ...]] = {
     "ricedata": (
@@ -72,31 +74,6 @@ def _gene_terms(question: str) -> list[str]:
     return terms[:12]
 
 
-def _explicit_name_mention(question: str, name: str | None) -> bool:
-    """Reject short numeric/Latin names embedded inside a longer identifier."""
-    if not name or not name.strip():
-        return False
-    haystack = question.casefold()
-    needle = name.strip().casefold()
-    offset = 0
-    while (start := haystack.find(needle, offset)) >= 0:
-        end = start + len(needle)
-        before = haystack[start - 1] if start else ""
-        after = haystack[end] if end < len(haystack) else ""
-        joined_on_left = (
-            needle[0].isascii() and needle[0].isalnum()
-            and before.isascii() and before.isalnum()
-        )
-        joined_on_right = (
-            needle[-1].isascii() and needle[-1].isalnum()
-            and after.isascii() and after.isalnum()
-        )
-        if not joined_on_left and not joined_on_right:
-            return True
-        offset = start + 1
-    return False
-
-
 def ensure_reference_read_access(session: Session, app_role: str) -> None:
     """Grant the API role SELECT on the explicit reference whitelist only."""
     if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", app_role):
@@ -133,26 +110,26 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
         WHERE variety_name IS NOT NULL
           AND (
               strpos(lower(:question), lower(variety_name)) > 0
+              OR (regexp_replace(variety_name, '[（(].*$', '') <> '' AND
+                  strpos(lower(:question), lower(regexp_replace(variety_name, '[（(].*$', ''))) > 0)
               OR EXISTS (
                   SELECT 1 FROM unnest(COALESCE(trial_names, ARRAY[]::text[]) ||
                                        COALESCE(former_names, ARRAY[]::text[])) AS alias_name
                   WHERE alias_name <> '' AND strpos(lower(:question), lower(alias_name)) > 0
               )
           )
-        ORDER BY char_length(variety_name) DESC, variety_id
-        LIMIT 32
+        ORDER BY char_length(regexp_replace(variety_name, '[（(].*$', '')) DESC, variety_id
+        LIMIT 300
     """, {"question": question})
-    varieties = [
-        row for row in candidates
-        if any(
-            _explicit_name_mention(question, name)
-            for name in (
-                row.get("variety_name"),
-                *(row.get("trial_names") or []),
-                *(row.get("former_names") or []),
-            )
-        )
-    ][:8]
+    scored = []
+    for row in candidates:
+        names = (row.get("variety_name"), re.sub(r"[（(].*$", "", row.get("variety_name") or "").strip(),
+                 *(row.get("trial_names") or []), *(row.get("former_names") or []))
+        length = max((len(name.strip()) for name in names if _explicit_name_mention(question, name)), default=0)
+        if length:
+            scored.append((length, row))
+    longest = max((length for length, _ in scored), default=0)
+    varieties = [row for length, row in scored if length == longest][:8]
     total = session.scalar(text("SELECT count(*) FROM ricedata.rice_variety")) or 0
     variety_ids = [row["variety_id"] for row in varieties]
     approvals = _rows(session, """
