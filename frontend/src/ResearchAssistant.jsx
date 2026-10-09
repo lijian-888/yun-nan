@@ -5,6 +5,7 @@ import {
   ArrowDown,
   BarChart3,
   Bot,
+  CircleHelp,
   ChevronDown,
   Dna,
   FileText,
@@ -381,6 +382,7 @@ export default function ResearchAssistant({ platformContext }) {
   const [attachments, setAttachments] = useState([]);
   const [composerAttachmentIds, setComposerAttachmentIds] = useState([]);
   const [draft, setDraft] = useState("");
+  const [clarificationDraft, setClarificationDraft] = useState("");
   const [notice, setNotice] = useState("");
   const [progress, setProgress] = useState("");
   const [loading, setLoading] = useState(true);
@@ -489,6 +491,7 @@ export default function ResearchAssistant({ platformContext }) {
     followLatestRef.current = true;
     setShowLatestButton(false);
     setMessages(messageList);
+    setClarificationDraft("");
     setAttachments(attachmentList);
     const sentAttachmentIds = new Set(messageList.flatMap((message) => (message.evidence || [])
       .filter((item) => item.type === "message_attachment" && item.attachment_id)
@@ -696,18 +699,17 @@ export default function ResearchAssistant({ platformContext }) {
     }
   }
 
-  async function sendQuestion(event) {
-    event?.preventDefault();
-    const content = draft.trim();
+  async function submitQuestion({ content, clarificationMessageId = "", clarificationAction = "" }) {
+    content = content.trim();
     if (!content || sending || !activeSessionId) return;
     setSending(true);
     setProgress("正在提交问题");
     setNotice("");
-    setDraft("");
+    if (!clarificationAction) setDraft("");
     followLatestRef.current = true;
     setShowLatestButton(false);
-    const currentTurnAttachmentIds = composerAttachmentIds.filter((id) => attachmentById.has(id));
-    const requestFingerprint = JSON.stringify({ content, knowledgeScope, attachmentIds: [...currentTurnAttachmentIds].sort() });
+    const currentTurnAttachmentIds = clarificationAction ? [] : composerAttachmentIds.filter((id) => attachmentById.has(id));
+    const requestFingerprint = JSON.stringify({ content, knowledgeScope, attachmentIds: [...currentTurnAttachmentIds].sort(), clarificationMessageId, clarificationAction });
     const idempotencyKey = retryRequestRef.current?.fingerprint === requestFingerprint
       ? retryRequestRef.current.key
       : crypto.randomUUID();
@@ -726,7 +728,7 @@ export default function ResearchAssistant({ platformContext }) {
       })),
     };
     const assistantEntry = { ...localMessage("assistant", ""), streaming: true };
-    setComposerAttachmentIds([]);
+    if (!clarificationAction) setComposerAttachmentIds([]);
     setMessages((items) => [...items, userEntry, assistantEntry]);
 
     try {
@@ -738,6 +740,7 @@ export default function ResearchAssistant({ platformContext }) {
           knowledge_scope: knowledgeScope,
           attachment_ids: currentTurnAttachmentIds,
           idempotency_key: idempotencyKey,
+          ...(clarificationAction ? { clarification_message_id: clarificationMessageId, clarification_action: clarificationAction } : {}),
         }),
         signal: abortController.signal,
       });
@@ -771,6 +774,7 @@ export default function ResearchAssistant({ platformContext }) {
           } else if (parsed.event === "complete") {
             completed = true;
             retryRequestRef.current = null;
+            if (clarificationAction) setClarificationDraft("");
             setMessages((items) => items.map((item) => item.id === assistantEntry.id ? parsed.data.message : item));
             if (parsed.data.message?.report_available) {
               // The user already explicitly asked for a report in this turn.
@@ -792,11 +796,15 @@ export default function ResearchAssistant({ platformContext }) {
       const detail = error instanceof Error && error.message
         ? error.message
         : "模型分析未完成，未获得可用的错误说明。";
-      setMessages((items) => items.map((item) => item.id === assistantEntry.id
-        ? { ...item, streaming: false, content: `分析未完成：${detail}`, error: true }
-        : item));
-      setComposerAttachmentIds((items) => [...new Set([...currentTurnAttachmentIds, ...items])]);
-      setDraft(content);
+      if (clarificationAction) {
+        setMessages((items) => items.filter((item) => item.id !== userEntry.id && item.id !== assistantEntry.id));
+      } else {
+        setMessages((items) => items.map((item) => item.id === assistantEntry.id
+          ? { ...item, streaming: false, content: `分析未完成：${detail}`, error: true }
+          : item));
+        setComposerAttachmentIds((items) => [...new Set([...currentTurnAttachmentIds, ...items])]);
+        setDraft(content);
+      }
       retryRequestRef.current = { fingerprint: requestFingerprint, key: idempotencyKey };
       setNotice(detail);
     } finally {
@@ -805,6 +813,17 @@ export default function ResearchAssistant({ platformContext }) {
       setSending(false);
       setProgress("");
     }
+  }
+
+  function sendQuestion(event) {
+    event?.preventDefault();
+    void submitQuestion({ content: draft });
+  }
+
+  function submitClarification(messageId, action) {
+    const content = action === "skip" ? "暂不补充，按已有信息继续" : clarificationDraft.trim();
+    if (!content) return;
+    void submitQuestion({ content, clarificationMessageId: messageId, clarificationAction: action });
   }
 
   async function cancelGeneration() {
@@ -872,6 +891,8 @@ export default function ResearchAssistant({ platformContext }) {
           const content = message.content || (message.streaming ? "正在调用大模型…" : "");
           const messageAttachments = (message.evidence || []).filter((item) => item.type === "message_attachment");
           const sourceEvidence = (message.evidence || []).filter((item) => item.type !== "message_attachment");
+          const clarification = (message.operation_state || []).find((item) => item?.state === "research_clarification");
+          const clarificationActive = clarification && messages.at(-1)?.id === message.id && !message.streaming;
           return <article className={`chat-message ${message.role} ${message.error ? "error" : ""}`} key={message.id}>
             <div className="message-avatar">{message.role === "assistant" ? <Bot size={18} /> : <UserRound size={17} />}</div>
             <div className="message-content">
@@ -888,6 +909,16 @@ export default function ResearchAssistant({ platformContext }) {
                 </button>;
               })}</div>}
               {message.streaming && <span className="stream-cursor" />}
+              {clarificationActive && <section className="assistant-clarification" aria-label="补充研究条件">
+                <label htmlFor={`clarification-${message.id}`}><CircleHelp size={17} />补充条件后继续分析</label>
+                <textarea id={`clarification-${message.id}`} value={clarificationDraft} onChange={(event) => setClarificationDraft(event.target.value)} onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    submitClarification(message.id, "answer");
+                  }
+                }} placeholder="例如：查看结实率，选 2000 年广西审定；或输入“全部表型数据”" disabled={sending} />
+                <div className="assistant-clarification-actions"><span>可只回答知道的部分；不确定可跳过。</span><button type="button" className="secondary-button" onClick={() => submitClarification(message.id, "skip")} disabled={sending}>跳过</button><button type="button" className="primary-button" onClick={() => submitClarification(message.id, "answer")} disabled={sending || !clarificationDraft.trim()}><SendHorizontal size={15} />补充并继续</button></div>
+              </section>}
               {message.role === "assistant" && message.report_available && <ReportDownloadCard message={message} onDownload={() => downloadResearchReport(message.id)} />}
               {sourceEvidence.length > 0 && <details className="evidence-card"><summary>证据与数据来源 <ChevronDown size={15} /></summary>{sourceEvidence.map((item, index) => <div className="evidence-item" key={`${item.type}-${index}`}><strong>{item.priority}. {item.title}</strong><span>{item.detail}</span>{item.query_template && <span>受控查询模板：{item.query_template}</span>}{item.query_parameters && <span>已验证参数：{JSON.stringify(item.query_parameters)}</span>}{item.query_planner && <span>参数解析方式：{item.query_planner}</span>}{item.url && <a href={item.url} target="_blank" rel="noreferrer">打开公开来源</a>}</div>)}</details>}
             </div>

@@ -154,6 +154,7 @@ from .research_report import build_analysis_chart_png, build_research_report_pdf
 from .research_search import build_public_web_context, requested_public_pages, resolve_public_request, search_public_references
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
 from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_question
+from .research_clarification import clarification_for_question, expanded_question
 from .breeding_dossier import (
     BreedingDossierError,
     build_breeding_report_context,
@@ -904,12 +905,16 @@ class AITaskCancelledError(RuntimeError):
 
 
 def _ai_request_hash(session_id: str, payload: "ResearchChatRequest") -> str:
-    canonical = json.dumps({
+    request_parts = {
         "session_id": session_id,
         "content": payload.content.strip(),
         "knowledge_scope": payload.knowledge_scope,
         "attachment_ids": sorted(set(payload.attachment_ids)),
-    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    }
+    if payload.clarification_action:
+        request_parts["clarification_action"] = payload.clarification_action
+        request_parts["clarification_message_id"] = payload.clarification_message_id
+    canonical = json.dumps(request_parts, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -2458,6 +2463,8 @@ class ResearchChatRequest(BaseModel):
     knowledge_scope: Literal["private", "public", "both"] = "both"
     attachment_ids: list[str] = Field(default_factory=list, max_length=20)
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=120, pattern=r"^[A-Za-z0-9._:-]+$")
+    clarification_message_id: str | None = Field(default=None, max_length=64)
+    clarification_action: Literal["answer", "skip"] | None = None
 
 
 class ResearchStructuredQueryRequest(BaseModel):
@@ -6775,6 +6782,8 @@ async def research_chat_stream(
 ) -> StreamingResponse:
     research_session = get_owned_research_session(session, research_session_id)
     account = sync_platform_account(session, user)
+    if bool(payload.clarification_action) != bool(payload.clarification_message_id):
+        raise HTTPException(422, "补充回答必须同时提供澄清消息编号和处理方式。")
     try:
         selected_provider = provider_settings()
     except AIGatewayConfigurationError as exc:
@@ -6810,9 +6819,58 @@ async def research_chat_stream(
             )
     if existing_task and existing_task.status in {"queued", "running"}:
         raise HTTPException(409, f"相同幂等键对应的 AI 任务仍为 {existing_task.status}，不会重复创建任务。")
+    # Order conversation turns across tabs while we inspect the latest message
+    # and persist either a clarification or a model request.
+    session.execute(
+        select(ResearchSession.id).where(ResearchSession.id == research_session_id).with_for_update()
+    ).scalar_one()
+    display_content = payload.content.strip()
+    clarification_resolution_state = ([{
+        "state": "research_clarification_resolved",
+        "action": payload.clarification_action,
+        "clarification_message_id": payload.clarification_message_id,
+    }] if payload.clarification_action else [])
+    pending_clarification: dict[str, Any] | None = None
+    clarification_attempt = 0
+    original_question = display_content
+    clarification_details = ""
+    if payload.clarification_action:
+        pending_message = session.get(ResearchMessage, payload.clarification_message_id)
+        latest_messages = session.scalars(
+            select(ResearchMessage).where(ResearchMessage.session_id == research_session_id)
+            .order_by(ResearchMessage.created_at.desc(), ResearchMessage.id.desc()).limit(2)
+        ).all()
+        retrying_same_user_turn = bool(
+            existing_task and existing_task.request_message_id and len(latest_messages) > 1
+            and latest_messages[0].id == existing_task.request_message_id
+            and latest_messages[1].id == payload.clarification_message_id
+        )
+        if (not pending_message or pending_message.session_id != research_session_id
+                or pending_message.role != "assistant" or not latest_messages
+                or (latest_messages[0].id != pending_message.id and not retrying_same_user_turn)):
+            raise HTTPException(409, "这条补充问题已不是当前会话的最新待答问题，请刷新会话后重试。")
+        marker = next((state for state in (pending_message.operation_state or [])
+                       if isinstance(state, dict) and state.get("state") == "research_clarification"), None)
+        if not marker or not isinstance(marker.get("original_question"), str):
+            raise HTTPException(409, "指定消息不是待补充的问题，请刷新会话后重试。")
+        original_question = marker["original_question"]
+        clarification_attempt = int(marker.get("attempt") or 1)
+        skipped = payload.clarification_action == "skip"
+        prior_details = str(marker.get("collected_details") or "").strip()
+        clarification_details = prior_details if skipped else "\n".join(
+            part for part in (prior_details, display_content) if part
+        )
+        effective_content = expanded_question(original_question, clarification_details, skipped=skipped)
+        if len(effective_content) > 12000:
+            raise HTTPException(413, "原问题与补充条件合计过长，请缩短补充内容后重试。")
+        payload = payload.model_copy(update={"content": effective_content})
+        if not skipped and not payload.attachment_ids:
+            pending_clarification = clarification_for_question(
+                session, original_question, supplement=clarification_details, attempt=clarification_attempt,
+            )
     # A specific RiceData metric is a database fact, not a generative answer.
     # Resolve approval ambiguity in the conversation before presenting a value.
-    if not payload.attachment_ids:
+    if not payload.attachment_ids and not pending_clarification:
         trait_history = session.scalars(
             select(ResearchMessage)
             .where(ResearchMessage.session_id == research_session_id)
@@ -6840,9 +6898,9 @@ async def research_chat_stream(
                     project_id=research_session.project_id,
                     owner_id=user.id,
                     role="user",
-                    content=payload.content.strip(),
+                    content=display_content,
                     evidence=[],
-                    operation_state=[{"state": "accepted", "label": "已接收指标查询"}],
+                    operation_state=[{"state": "accepted", "label": "已接收指标查询"}, *clarification_resolution_state],
                 )
                 session.add(user_message)
                 session.flush()
@@ -6910,6 +6968,93 @@ async def research_chat_stream(
                 stream_trait_result(), media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
+    clarification = pending_clarification
+    if not clarification and not payload.clarification_action and not payload.attachment_ids:
+        clarification = clarification_for_question(session, display_content)
+    if clarification:
+        title = auto_title_for_first_message(
+            research_session.title, original_question, has_messages=bool(
+                session.scalar(select(ResearchMessage.id).where(ResearchMessage.session_id == research_session_id).limit(1))
+            ),
+        )
+        if title:
+            research_session.title = title
+        now = datetime.now(timezone.utc)
+        research_session.updated_at = now
+        user_message = (
+            session.get(ResearchMessage, existing_task.request_message_id)
+            if existing_task and existing_task.request_message_id else None
+        )
+        if not user_message:
+            user_message = ResearchMessage(
+                session_id=research_session_id,
+                project_id=research_session.project_id,
+                owner_id=user.id,
+                role="user",
+                content=display_content,
+                evidence=[],
+                operation_state=[{"state": "accepted", "label": "已接收问题"}, *clarification_resolution_state],
+            )
+            session.add(user_message)
+            session.flush()
+        task = existing_task or AIGatewayTask(
+            institution_id=account.institution_id,
+            project_id=research_session.project_id,
+            owner_id=user.id,
+            session_id=research_session_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            provider="local_database",
+            model="research_clarification",
+        )
+        task.provider = "local_database"
+        task.model = "research_clarification"
+        task.status = "completed"
+        task.egress_classification = "local_only"
+        task.redaction_count = 0
+        task.request_message_id = user_message.id
+        task.started_at = now
+        task.completed_at = now
+        task.error_code = None
+        task.error_message = None
+        session.add(task)
+        session.flush()
+        assistant_message = ResearchMessage(
+            session_id=research_session_id,
+            project_id=research_session.project_id,
+            owner_id=user.id,
+            role="assistant",
+            content=clarification["question"],
+            evidence=[],
+            operation_state=[
+                {"state": "completed", "label": "等待补充研究条件"},
+                {"state": "research_clarification", "kind": clarification["kind"],
+                 "question": clarification["question"], "original_question": original_question,
+                 "collected_details": clarification_details, "attempt": clarification_attempt + 1},
+            ],
+        )
+        session.add(assistant_message)
+        session.flush()
+        task.result_message_id = assistant_message.id
+        session.add(ResearchAudit(
+            owner_id=user.id, project_id=research_session.project_id,
+            session_id=research_session_id, action="research_clarification_requested",
+            audit_metadata={"kind": clarification["kind"], "attempt": clarification_attempt + 1},
+        ))
+        _record_ai_audit(session, task, "local_clarification_completed", "completed")
+        response_message = serialize_research_message(assistant_message)
+        session.commit()
+
+        async def stream_clarification() -> Any:
+            if title:
+                yield sse_event("session_title", {"session_id": research_session_id, "title": title})
+            yield sse_event("status", {"label": "需要补充查询范围", "task_id": task.id})
+            yield sse_event("complete", {"message": response_message, "task_id": task.id})
+
+        return StreamingResponse(
+            stream_clarification(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     # A completed model answer may be followed by a short numeric-trait query.
     # Keep the database identity on that answer, independent of model memory.
     model_variety_context = variety_context_from_question(session, payload.content.strip())
@@ -7060,10 +7205,11 @@ async def research_chat_stream(
             project_id=research_session.project_id,
             owner_id=user.id,
             role="user",
-            content=payload.content.strip(),
+            content=display_content,
             evidence=message_attachment_evidence(current_turn_attachments),
             operation_state=[
                 {"state": "accepted", "label": "已接收问题"},
+                *clarification_resolution_state,
                 *([{ "state": "attachments", "label": f"已随本轮提交 {len(current_turn_attachments)} 个附件" }] if current_turn_attachments else []),
                 *([{
                     "state": "report_requested",
