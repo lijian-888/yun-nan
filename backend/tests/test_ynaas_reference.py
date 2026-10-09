@@ -17,6 +17,24 @@ class YnaasReferenceIntentTests(unittest.TestCase):
             (True, True, False),
         )
 
+    def test_bare_cultivar_name_requests_local_variety_evidence(self):
+        self.assertEqual(_reference_intents("南粳9212（宁9212）的数据"), (True, False, False))
+
+    @patch("app.ynaas_reference._rows", side_effect=[
+        [{"variety_id": 34078, "variety_name": "南粳9212（宁9212）"}],
+        [],
+    ])
+    def test_bare_cultivar_name_returns_matching_record(self, rows):
+        context, cards = build_ynaas_database_evidence(
+            CountOnlySession(), "南粳9212（宁9212）的数据"
+        )
+
+        result = json.loads(context)["variety_and_pedigree"]
+        self.assertEqual(result["match_mode"], "question_exact_name_or_alias")
+        self.assertEqual(result["varieties"][0]["variety_name"], "南粳9212（宁9212）")
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(rows.call_count, 2)
+
     def test_gene_identifiers_are_normalized_and_bounded(self):
         self.assertEqual(_gene_terms("查询 OsSPL14 和 Hd3a 基因的 GO 功能"), ["osspl14", "hd3a"])
 

@@ -36,6 +36,7 @@ REFERENCE_TABLES: dict[str, tuple[str, ...]] = {
 }
 
 _VARIETY_MARKERS = ("品种", "材料", "审定", "系谱", "亲本", "父本", "母本", "选育", "栽培", "产量", "抗性")
+_VARIETY_NAME_HINT = re.compile(r"[\u4e00-\u9fff]{1,12}[A-Za-z]{0,3}\d{2,}")
 _PEDIGREE_MARKERS = ("系谱", "亲本", "父本", "母本", "杂交组合", "亲缘")
 _GENE_MARKERS = ("基因", "位点", "染色体", "注释", "功能", "qtl", "locus", "gene", "symbol", "go ")
 _GENE_TOKEN = re.compile(r"(?<![A-Za-z0-9_.-])([A-Za-z][A-Za-z0-9_.-]{1,39})(?![A-Za-z0-9_.-])")
@@ -46,7 +47,12 @@ _GENE_STOP_WORDS = {
 
 def _reference_intents(question: str) -> tuple[bool, bool, bool]:
     normalized = (question or "").strip().lower()
-    variety = any(marker in normalized for marker in _VARIETY_MARKERS)
+    # A researcher may ask directly for "南粳9212（宁9212）的数据" without
+    # saying "品种". A Chinese cultivar name followed by its numeric code is
+    # enough to attempt an exact name/alias lookup, never a catalog sample.
+    variety = any(marker in normalized for marker in _VARIETY_MARKERS) or bool(
+        _VARIETY_NAME_HINT.search(question or "")
+    )
     pedigree = any(marker in normalized for marker in _PEDIGREE_MARKERS)
     gene = any(marker in normalized for marker in _GENE_MARKERS)
     return variety or pedigree, pedigree, gene
