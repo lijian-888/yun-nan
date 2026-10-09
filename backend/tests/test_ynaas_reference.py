@@ -1,6 +1,13 @@
+import json
 import unittest
+from unittest.mock import patch
 
-from app.ynaas_reference import _gene_terms, _reference_intents, build_ynaas_database_evidence
+from app.ynaas_reference import _gene_evidence, _gene_terms, _reference_intents, _variety_evidence, build_ynaas_database_evidence
+
+
+class CountOnlySession:
+    def scalar(self, *args, **kwargs):
+        return 100
 
 
 class YnaasReferenceIntentTests(unittest.TestCase):
@@ -25,6 +32,48 @@ class YnaasReferenceIntentTests(unittest.TestCase):
             build_ynaas_database_evidence(SessionThatMustNotBeUsed(), "今天的田间天气怎么样？"),
             ("", []),
         )
+
+    @patch("app.ynaas_reference._rows", return_value=[])
+    def test_unknown_variety_returns_not_found_without_catalog_sample(self, rows):
+        context, cards = build_ynaas_database_evidence(CountOnlySession(), "查询不存在品种的系谱")
+        result = json.loads(context)["variety_and_pedigree"]
+
+        self.assertEqual(result["match_mode"], "not_found")
+        self.assertIn("未找到", result["message"])
+        self.assertEqual(result["varieties"], [])
+        self.assertEqual(result["approvals"], [])
+        self.assertEqual(result["pedigrees"], [])
+        self.assertIn("未找到", cards[0]["detail"])
+        rows.assert_called_once()
+
+    @patch("app.ynaas_reference._rows")
+    def test_gene_without_identifier_does_not_sample_catalog(self, rows):
+        result = _gene_evidence(CountOnlySession(), "查询水稻基因信息")
+
+        self.assertEqual(result["match_mode"], "no_identifier")
+        self.assertEqual(result["genes"], [])
+        self.assertIn("未提供", result["message"])
+        rows.assert_not_called()
+
+    @patch("app.ynaas_reference._rows", return_value=[])
+    def test_unknown_gene_returns_not_found_without_catalog_sample(self, rows):
+        result = _gene_evidence(CountOnlySession(), "查询 ZZTEST404 基因")
+
+        self.assertEqual(result["match_mode"], "not_found")
+        self.assertEqual(result["genes"], [])
+        self.assertIn("未找到", result["message"])
+        rows.assert_called_once()
+
+    @patch("app.ynaas_reference._rows", side_effect=[
+        [{"variety_id": 7, "variety_name": "云稻七号"}],
+        [],
+    ])
+    def test_matching_variety_still_returns_its_record(self, rows):
+        result = _variety_evidence(CountOnlySession(), "查询云稻七号品种", False)
+
+        self.assertEqual(result["match_mode"], "question_exact_name_or_alias")
+        self.assertEqual(result["varieties"], [{"variety_id": 7, "variety_name": "云稻七号"}])
+        self.assertEqual(rows.call_count, 2)
 
 
 if __name__ == "__main__":

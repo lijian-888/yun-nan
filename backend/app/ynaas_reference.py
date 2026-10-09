@@ -108,14 +108,6 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
         LIMIT 8
     """, {"question": question})
     total = session.scalar(text("SELECT count(*) FROM ricedata.rice_variety")) or 0
-    if not varieties:
-        varieties = _rows(session, """
-            SELECT variety_id, source_variety_id, variety_name, trial_names, former_names,
-                   variety_type, parentage_text, breeder_text, applicant_text, source_url
-            FROM ricedata.rice_variety
-            ORDER BY variety_id
-            LIMIT 10
-        """)
     variety_ids = [row["variety_id"] for row in varieties]
     approvals = _rows(session, """
         SELECT variety_id, approval_no, approval_year, approval_type, approval_region,
@@ -170,9 +162,8 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
         """, {"variety_ids": variety_ids})
     return {
         "catalog_total": int(total),
-        "match_mode": "question_exact_name_or_alias" if any(
-            (row.get("variety_name") or "").lower() in question.lower() for row in varieties
-        ) else "bounded_catalog_sample",
+        "match_mode": "question_exact_name_or_alias" if varieties else "not_found",
+        "message": "未找到与问题中的品种名称或别名匹配的记录。" if not varieties else "",
         "varieties": varieties,
         "approvals": approvals,
         "pedigrees": pedigrees,
@@ -182,6 +173,7 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
 def _gene_evidence(session: Session, question: str) -> dict[str, Any]:
     terms = _gene_terms(question)
     total = session.scalar(text("SELECT count(*) FROM ricedata.rice_gene")) or 0
+    genes: list[dict[str, Any]] = []
     if terms:
         genes = _rows(session, """
             WITH matches AS (
@@ -207,17 +199,6 @@ def _gene_evidence(session: Session, question: str) -> dict[str, Any]:
             ORDER BY g.rice_gene_id
             LIMIT 12
         """, {"terms": terms})
-    else:
-        genes = _rows(session, """
-            SELECT g.rice_gene_id, g.gene_name_annotation, g.gene_symbol_raw,
-                   g.ncbi_locus_raw, g.source_url, ARRAY[]::varchar[] AS symbols,
-                   NULL::bigint AS ncbi_gene_id, NULL::varchar AS ncbi_locus,
-                   NULL::text AS ncbi_url, NULL::varchar AS resolution_status,
-                   NULL::varchar AS primary_symbol, NULL::text AS description,
-                   NULL::text AS tax_name, NULL::varchar AS gene_type,
-                   ARRAY[]::text[] AS chromosomes, NULL::varchar AS locus_tag
-            FROM ricedata.rice_gene g ORDER BY g.rice_gene_id LIMIT 8
-        """)
     ncbi_ids = sorted({row["ncbi_gene_id"] for row in genes if row.get("ncbi_gene_id")})
     aliases = _rows(session, """
         SELECT ncbi_gene_id, alias_type, alias_text
@@ -244,7 +225,12 @@ def _gene_evidence(session: Session, question: str) -> dict[str, Any]:
     return {
         "catalog_total": int(total),
         "normalized_query_terms": terms,
-        "match_mode": "exact_normalized_identifier" if terms else "bounded_catalog_sample",
+        "match_mode": "exact_normalized_identifier" if genes else ("not_found" if terms else "no_identifier"),
+        "message": (
+            "未找到与所给基因名称或编号匹配的记录。" if terms and not genes
+            else "未提供可识别的基因名称或编号，未执行基因记录查询。" if not terms
+            else ""
+        ),
         "genes": genes,
         "aliases": aliases,
         "annotations": annotations,
@@ -262,7 +248,8 @@ def build_ynaas_database_evidence(session: Session, question: str) -> tuple[str,
         "access": "read_only_fixed_parameterized_templates",
         "question": question.strip(),
         "limitations": [
-            "Results are bounded and may be a catalog sample when no exact identifier is present.",
+            "Only matching records are returned; no catalog sample is substituted for missing matches.",
+            "If match_mode is not_found or no_identifier, report that clearly and do not infer a variety or gene from catalog_total.",
             "Pedigree traversal is limited to four generations and 120 nodes.",
             "Absence from this evidence bundle does not prove absence from the complete database.",
         ],
@@ -275,7 +262,7 @@ def build_ynaas_database_evidence(session: Session, question: str) -> tuple[str,
             "priority": 1,
             "type": "ynaas_existing_database",
             "title": "云南既有品种与系谱数据库",
-            "detail": f"只读固定模板；本轮返回 {len(result['varieties'])} 个品种、{len(result['approvals'])} 条审定信息、{len(result['pedigrees'])} 个系谱节点。",
+            "detail": result["message"] or f"只读固定模板；本轮返回 {len(result['varieties'])} 个品种、{len(result['approvals'])} 条审定信息、{len(result['pedigrees'])} 个系谱节点。",
         })
     if gene_requested:
         payload["genes"] = _gene_evidence(session, question)
@@ -284,6 +271,6 @@ def build_ynaas_database_evidence(session: Session, question: str) -> tuple[str,
             "priority": 1,
             "type": "ynaas_existing_database",
             "title": "云南既有水稻基因数据库",
-            "detail": f"只读固定模板；本轮返回 {len(result['genes'])} 条基因记录、{len(result['go_annotations'])} 条 GO 注释。",
+            "detail": result["message"] or f"只读固定模板；本轮返回 {len(result['genes'])} 条基因记录、{len(result['go_annotations'])} 条 GO 注释。",
         })
     return json.dumps(payload, ensure_ascii=False, default=str), cards
