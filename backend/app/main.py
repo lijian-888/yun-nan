@@ -6817,7 +6817,7 @@ async def research_chat_stream(
             select(ResearchMessage)
             .where(ResearchMessage.session_id == research_session_id)
             .order_by(ResearchMessage.created_at.desc(), ResearchMessage.id.desc())
-            .limit(8)
+            .limit(32)
         ).all()
         if existing_task and existing_task.request_message_id:
             trait_history = [item for item in trait_history if item.id != existing_task.request_message_id]
@@ -6869,6 +6869,8 @@ async def research_chat_stream(
             session.add(task)
             session.flush()
             operation_state = [{"state": "completed", "label": "已按品种、审定记录和原始文本完成数据库查询"}]
+            if trait_result.get("context"):
+                operation_state.append(trait_result["context"])
             if trait_result.get("pending"):
                 operation_state.append(trait_result["pending"])
             assistant_message = ResearchMessage(
