@@ -35,6 +35,22 @@ class YnaasReferenceIntentTests(unittest.TestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual(rows.call_count, 2)
 
+    @patch("app.ynaas_reference._rows", side_effect=[
+        [
+            {"variety_id": 34078, "variety_name": "南粳9212（宁9212）"},
+            {"variety_id": 40697, "variety_name": "921"},
+        ],
+        [],
+    ])
+    def test_number_substring_is_not_a_second_variety(self, rows):
+        context, _ = build_ynaas_database_evidence(
+            CountOnlySession(), "南粳9212（宁9212）的数据"
+        )
+
+        result = json.loads(context)["variety_and_pedigree"]
+        self.assertEqual([row["variety_id"] for row in result["varieties"]], [34078])
+        self.assertEqual(rows.call_args_list[1].args[2]["variety_ids"], [34078])
+
     def test_gene_identifiers_are_normalized_and_bounded(self):
         self.assertEqual(_gene_terms("查询 OsSPL14 和 Hd3a 基因的 GO 功能"), ["osspl14", "hd3a"])
 

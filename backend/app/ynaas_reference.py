@@ -68,6 +68,31 @@ def _gene_terms(question: str) -> list[str]:
     return terms[:12]
 
 
+def _explicit_name_mention(question: str, name: str | None) -> bool:
+    """Reject short numeric/Latin names embedded inside a longer identifier."""
+    if not name or not name.strip():
+        return False
+    haystack = question.casefold()
+    needle = name.strip().casefold()
+    offset = 0
+    while (start := haystack.find(needle, offset)) >= 0:
+        end = start + len(needle)
+        before = haystack[start - 1] if start else ""
+        after = haystack[end] if end < len(haystack) else ""
+        joined_on_left = (
+            needle[0].isascii() and needle[0].isalnum()
+            and before.isascii() and before.isalnum()
+        )
+        joined_on_right = (
+            needle[-1].isascii() and needle[-1].isalnum()
+            and after.isascii() and after.isalnum()
+        )
+        if not joined_on_left and not joined_on_right:
+            return True
+        offset = start + 1
+    return False
+
+
 def ensure_reference_read_access(session: Session, app_role: str) -> None:
     """Grant the API role SELECT on the explicit reference whitelist only."""
     if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", app_role):
@@ -97,7 +122,7 @@ def _rows(session: Session, sql: str, params: dict[str, Any] | None = None) -> l
 
 
 def _variety_evidence(session: Session, question: str, include_pedigree: bool) -> dict[str, Any]:
-    varieties = _rows(session, """
+    candidates = _rows(session, """
         SELECT variety_id, source_variety_id, variety_name, trial_names, former_names,
                variety_type, parentage_text, breeder_text, applicant_text, source_url
         FROM ricedata.rice_variety
@@ -111,8 +136,19 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
               )
           )
         ORDER BY char_length(variety_name) DESC, variety_id
-        LIMIT 8
+        LIMIT 32
     """, {"question": question})
+    varieties = [
+        row for row in candidates
+        if any(
+            _explicit_name_mention(question, name)
+            for name in (
+                row.get("variety_name"),
+                *(row.get("trial_names") or []),
+                *(row.get("former_names") or []),
+            )
+        )
+    ][:8]
     total = session.scalar(text("SELECT count(*) FROM ricedata.rice_variety")) or 0
     variety_ids = [row["variety_id"] for row in varieties]
     approvals = _rows(session, """
