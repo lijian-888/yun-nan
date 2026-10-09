@@ -153,7 +153,7 @@ from .ai_gateway import (
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
 from .research_search import build_public_web_context, requested_public_pages, resolve_public_request, search_public_references
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
-from .ricedata_trait_lookup import lookup_numeric_trait
+from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_question
 from .breeding_dossier import (
     BreedingDossierError,
     build_breeding_report_context,
@@ -6910,6 +6910,9 @@ async def research_chat_stream(
                 stream_trait_result(), media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
+    # A completed model answer may be followed by a short numeric-trait query.
+    # Keep the database identity on that answer, independent of model memory.
+    model_variety_context = variety_context_from_question(session, payload.content.strip())
     breeding_report_requested = is_breeding_report_request(payload.content)
     report_requested = is_report_request(payload.content) or breeding_report_requested
     breeding_report_context: dict[str, Any] | None = None
@@ -7271,6 +7274,7 @@ async def research_chat_stream(
                         evidence=evidence,
                         operation_state=[
                             {"state": "completed", "label": {"public_search_evidence": "已返回公开检索来源（模型未完成综合分析）", "public_page_unavailable": "指定网页未读取成功，已返回原因"}.get(result.get("response_mode"), "已完成大模型分析")},
+                            *([model_variety_context] if model_variety_context else []),
                             *([{ "state": "web_search", "label": f"已补充 {len(web_results)} 条可信公开来源" }] if web_results else []),
                             {"state": "evidence", "label": f"已附带 {len(evidence)} 项证据"},
                             *([{
@@ -7382,6 +7386,7 @@ async def research_chat_stream(
                     evidence=evidence,
                     operation_state=[
                         {"state": "completed", "label": "已完成受控数据报告生成"},
+                        *([model_variety_context] if model_variety_context else []),
                         {
                             "state": "model_output_unavailable",
                             "label": "大模型未返回可展示的说明文本，未将占位内容保存为科研结论",

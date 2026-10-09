@@ -6,7 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.ricedata_trait_facts import extract_narrative_facts, requested_traits
-from app.ricedata_trait_lookup import _approval_followup, lookup_numeric_trait
+from app.ricedata_trait_lookup import (
+    _approval_followup, lookup_numeric_trait, variety_context_from_question,
+)
 
 
 class NarrativeExtractionTests(unittest.TestCase):
@@ -119,6 +121,45 @@ class ApprovalLookupIntegrationTests(unittest.TestCase):
         with Session(self.engine) as session:
             result = lookup_numeric_trait(session, "垩白粒率是多少？", [unrelated, old_question])
             self.assertIn("请提供完整品种名", result["content"])
+
+    def test_general_variety_answer_carries_identity_to_trait_clarification(self):
+        question = "中9优838选（国丰1号;中优838）的特征特性如何？"
+        with Session(self.engine) as session:
+            marker = variety_context_from_question(session, question)
+            self.assertEqual(marker, {"state": "ricedata_variety_context", "variety_id": 5527})
+            overview = SimpleNamespace(role="assistant", content="中9优838选（国丰1号;中优838）特征特性",
+                                       operation_state=[{"state": "completed"}, marker])
+            clarification = lookup_numeric_trait(session, "结实率是多少？", [overview])
+            self.assertIn("桂审稻200044号", clarification["content"])
+            self.assertIn("赣审稻2001002", clarification["content"])
+            self.assertNotIn("85%", clarification["content"])
+            pending = SimpleNamespace(role="assistant", content=clarification["content"],
+                                      operation_state=[clarification["context"], clarification["pending"]])
+            answer = lookup_numeric_trait(session, "广西2000年", [pending])
+            self.assertIn("桂审稻200044号", answer["content"])
+            self.assertIn("85%", answer["content"])
+
+    def test_pre_upgrade_general_answer_recovers_only_adjacent_named_variety(self):
+        question = SimpleNamespace(role="user", content="中9优838选（国丰1号;中优838）的特征特性如何？")
+        overview = SimpleNamespace(role="assistant", content="中9优838选（国丰1号； 中优838）特征特性",
+                                   operation_state=[{"state": "completed", "label": "已完成大模型分析"}])
+        with Session(self.engine) as session:
+            result = lookup_numeric_trait(session, "结实率是多少？", [overview, question])
+            self.assertIn("桂审稻200044号", result["content"])
+            prior_failed_answer = SimpleNamespace(
+                role="assistant", content="未找到问题中的品种，无法查询“结实率”。", operation_state=[])
+            prior_failed_question = SimpleNamespace(role="user", content="结实率是多少？")
+            retry = lookup_numeric_trait(session, "结实率是多少？", [prior_failed_answer,
+                                                                 prior_failed_question, overview, question])
+            self.assertIn("桂审稻200044号", retry["content"])
+
+    def test_new_explicit_variety_overrides_previous_context(self):
+        with Session(self.engine) as session:
+            previous = SimpleNamespace(role="assistant", operation_state=[
+                {"state": "ricedata_variety_context", "variety_id": 5527}], content="...")
+            result = lookup_numeric_trait(session, "D优130的直链淀粉含量是多少？", [previous])
+            self.assertIn("闽审稻2006008", result["content"])
+            self.assertNotIn("桂审稻200044号", result["content"])
 
 
 if __name__ == "__main__":

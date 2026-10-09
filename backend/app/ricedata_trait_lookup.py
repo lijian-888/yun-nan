@@ -130,24 +130,68 @@ def _approval_followup(question: str) -> bool:
     )
 
 
+def variety_context_from_question(session: Session, question: str) -> dict | None:
+    """Persist a uniquely named database variety across a completed general answer."""
+    varieties = _find_varieties(session, question)
+    if len(varieties) != 1:
+        return None
+    return {"state": "ricedata_variety_context", "variety_id": varieties[0]["variety_id"]}
+
+
+def _normalized_name_text(value: str) -> str:
+    return re.sub(r"[\s;；,，()（）]+", "", value).casefold()
+
+
 def _history_context(session: Session, history_items: list[Any]) -> dict | None:
-    """Read structured state from the last answer; recover pre-upgrade answers once."""
-    last_assistant = next((item for item in history_items if getattr(item, "role", None) == "assistant"), None)
+    """Read the last resolved variety, including a bounded legacy-answer fallback."""
+    last_index = next((index for index, item in enumerate(history_items)
+                       if getattr(item, "role", None) == "assistant"), None)
+    if last_index is None:
+        return None
+    # Pre-upgrade local lookup failures carried no context. Let a retry recover
+    # the immediately preceding general variety answer, but not arbitrary history.
+    if "未找到问题中的品种" in str(getattr(history_items[last_index], "content", "")):
+        older = history_items[last_index + 1:]
+        next_index = next((index for index, item in enumerate(older)
+                           if getattr(item, "role", None) == "assistant"), None)
+        if next_index is not None:
+            history_items = older[next_index:]
+            last_index = 0
+    last_assistant = history_items[last_index]
     if not last_assistant:
         return None
     states = getattr(last_assistant, "operation_state", None) or []
     for state in states:
+        if state.get("state") == "ricedata_variety_context" and isinstance(state.get("variety_id"), int):
+            return {"variety_id": state["variety_id"], "trait_code": None, "approval_id": None}
         if state.get("state") in {"ricedata_trait_context", "ricedata_trait_clarification"}:
             code = state.get("trait_code")
             variety_id = state.get("variety_id")
             if code in TRAIT_BY_CODE and isinstance(variety_id, int):
                 return {"variety_id": variety_id, "trait_code": code,
                         "approval_id": state.get("approval_id")}
-    # Compatibility for deterministic answers persisted before per-turn state
-    # was introduced. Never infer context from a generative model answer.
+    # General variety answers saved before the structured context marker can
+    # be recovered only when the adjacent user turn uniquely named a variety
+    # and the answer explicitly names that same variety. Never mine old topics.
     if not any(state.get("state") == "completed" and
                state.get("label") == "已按品种、审定记录和原始文本完成数据库查询" for state in states):
+        previous_user = next((item for item in history_items[last_index + 1:]
+                              if getattr(item, "role", None) == "user"), None)
+        if previous_user:
+            variety_context = variety_context_from_question(
+                session, str(getattr(previous_user, "content", "") or ""))
+            if variety_context:
+                variety = _rows(session, """
+                    SELECT variety_name FROM ricedata.rice_variety WHERE variety_id = :variety_id
+                """, {"variety_id": variety_context["variety_id"]})
+                if variety and _normalized_name_text(variety[0]["variety_name"]) in _normalized_name_text(
+                    str(getattr(last_assistant, "content", "") or "")
+                ):
+                    return {"variety_id": variety_context["variety_id"],
+                            "trait_code": None, "approval_id": None}
         return None
+    # Compatibility for deterministic answers persisted before per-turn state
+    # was introduced.
     headline = str(getattr(last_assistant, "content", "") or "").splitlines()[0]
     specs = requested_traits(headline)
     varieties = _find_varieties(session, headline) if len(specs) == 1 else []
@@ -183,6 +227,8 @@ def lookup_numeric_trait(
     context = _history_context(session, history_items) if history_items else None
     if not specs and not context:
         return _outcome("请提供要查询的品种和具体指标；仅凭省份无法确定您想查哪条数据。")
+    if not specs and context and not context.get("trait_code"):
+        return _outcome("已找到上一轮讨论的品种。请说明要查询哪一个具体指标；我会按审定记录核对数值。")
     if len(specs) > 1:
         names = "、".join(spec.name for spec in specs)
         return _outcome(f"您提到了多个指标（{names}）。请先指定要查询哪一个具体指标；我会按审定记录给出原始数值。")
