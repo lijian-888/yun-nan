@@ -587,7 +587,12 @@ async def stream_research_reply(
         model = OpenAIChatModel(
             model_name=model_name,
             api_key=api_key or "not-required",
-            stream=True,
+            # AgentScope 1.0.21's stream parser checks `"data" in
+            # choice.delta.audio` even when the OpenAI-compatible text chunk
+            # has audio=None. CherryIN therefore fails before any answer is
+            # produced. Its non-stream parser handles empty audio correctly.
+            # Keep streaming for the local vLLM provider.
+            stream=provider.provider != "cherryin",
             client_kwargs={"base_url": base_url},
             generate_kwargs={"temperature": 0.2},
         )

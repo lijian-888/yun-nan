@@ -37,6 +37,7 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
 class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
     async def run_reply(self, context, native_answer=None, reasoning_timeout=False):
+        self.model_kwargs = []
         class Msg:
             def __init__(self, name, content, role):
                 self.name, self.content, self.role = name, content, role
@@ -65,14 +66,19 @@ class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
             "agentscope.memory": {"InMemoryMemory": Memory},
             "agentscope.message": {"Msg": Msg},
             "agentscope.formatter": {"OpenAIChatFormatter": lambda **kwargs: None},
-            "agentscope.model": {"OpenAIChatModel": lambda **kwargs: None},
+            "agentscope.model": {"OpenAIChatModel": lambda **kwargs: self.model_kwargs.append(kwargs) or None},
             "agentscope.token": {"CharTokenCounter": lambda: None},
         }.items():
             module = types.ModuleType(name)
             module.__dict__.update(values)
             modules[name] = module
-        with patch.dict(sys.modules, modules), patch.dict(os.environ, {"YUNNAN_API_KEY": "test"}), patch.object(agent, "_build_react_toolkit", side_effect=toolkit), patch.object(agent, "_execute_controlled_react_action", new=AsyncMock()), patch.object(agent, "_native_public_evidence_answer", new=AsyncMock(return_value=native_answer)):
+        with patch.dict(sys.modules, modules), patch.dict(os.environ, {"AI_PROVIDER": "cherryin", "YUNNAN_API_KEY": "test"}), patch.object(agent, "_build_react_toolkit", side_effect=toolkit), patch.object(agent, "_execute_controlled_react_action", new=AsyncMock()), patch.object(agent, "_native_public_evidence_answer", new=AsyncMock(return_value=native_answer)):
             return [event async for event in agent.stream_research_reply(user_prompt="找到赣晚籼35号", evidence_context="", memory_state={}, public_web_context=context)]
+
+    async def test_cherryin_uses_non_streaming_agentscope_parser(self):
+        await self.run_reply(CONTEXT)
+        self.assertTrue(self.model_kwargs)
+        self.assertTrue(all(kwargs["stream"] is False for kwargs in self.model_kwargs))
 
     async def test_empty_provider_preserves_sources_and_clean_memory(self):
         events = await self.run_reply(CONTEXT)
