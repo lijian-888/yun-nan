@@ -124,9 +124,17 @@ def _core_answer(session: Session, material: dict, question: str, traits: list) 
             scope_note = "；原字段未明确每穗口径，不能直接认定为每穗实粒数"
         value = row["raw_value"] or row["value_text"] or (
             str(row["value_numeric"]) if row["value_numeric"] is not None else "未提供数值")
+        # Keep the original value and its independently stored unit together in
+        # the evidence. A separated "24.69（原单位：g）" was incorrectly rejected
+        # by the grounded-answer guard when the model faithfully wrote 24.69 g.
+        # Never infer or convert a unit that the source did not record.
+        display_value = str(value)
+        source_unit = str(row["unit"] or "").strip()
+        if source_unit and re.fullmatch(r"[+-]?\d+(?:\.\d+)?", display_value.strip()):
+            display_value = f"{display_value} {source_unit}"
         when = str(row["observed_on"] or row["trial_year"] or "观测年份未明确")
         status = "；该数值待复核，不作为确认值" if row["quality_status"] != "accepted" else ""
-        lines.append(f"- **{row['raw_header']}：{value}**（原单位：{row['unit'] or '未注明'}）；"
+        lines.append(f"- **{row['raw_header']}：{display_value}**（原单位：{row['unit'] or '未注明'}）；"
                      f"年份/日期：{when}；地点：{row['observation_location'] or '未注明'}；"
                      f"来源文件编号：{row['source_file_id']}，工作表：{row['sheet_name']}，行：{row['row_number']}；"
                      f"观测记录：{row['phenotype_value_id']}{scope_note}{status}。")

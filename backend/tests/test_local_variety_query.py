@@ -8,7 +8,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.local_variety_query import _unshadowed_materials, contains_institute_history, lookup_local_variety_data, source_scope
+from app.local_variety_query import _core_answer, _unshadowed_materials, contains_institute_history, lookup_local_variety_data, source_scope
+from app.dialogue_orchestration import validate_fact_measurements
 from app.ricedata_trait_lookup import _approval_followup, lookup_numeric_trait
 from app.ricedata_variety_identity import has_explicit_subject, resolve_varieties, select_name_matches
 from app.ricedata_variety_overview import lookup_variety_overview
@@ -21,6 +22,18 @@ def history(result):
 
 
 class QueryContractTests(unittest.TestCase):
+    @patch("app.local_variety_query._rows")
+    def test_split_observation_value_and_unit_support_grounded_answer(self, rows):
+        rows.return_value = [{"raw_value": "24.69", "value_text": None, "value_numeric": 24.69,
+                              "unit": "g", "raw_header": "千粒重", "observed_on": None,
+                              "trial_year": 2025, "quality_status": "accepted",
+                              "observation_location": None, "source_file_id": "SRC-1",
+                              "sheet_name": "sheet", "row_number": 3,
+                              "phenotype_value_id": "PV-1"}]
+        result = _core_answer(None, {"material_id": "MAT-1", "preferred_name": "测试材料"}, "千粒重", [])
+        self.assertIn("24.69 g", result["content"])
+        validate_fact_measurements("千粒重为24.69 g。", result["content"])
+
     def test_longest_match_is_local_to_its_occurrence(self):
         rows = [{"variety_name": "D优130"}, {"variety_name": "国稻3号"}, {"variety_name": "3号"}]
         self.assertEqual(select_name_matches("D优130和国稻3号的株高", rows), rows[:2])
