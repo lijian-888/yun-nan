@@ -149,7 +149,9 @@ from .ai_gateway import (
     prepare_egress,
     provider_settings,
     redact_secrets,
+    shared_business_egress_enabled,
 )
+from .business_data_query import DataQuery, BusinessQueryError, load_business_catalog, execute_business_query, build_business_evidence
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
 from .research_search import build_public_web_context, requested_public_pages, resolve_public_request, search_public_references
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
@@ -1290,6 +1292,21 @@ def _set_knowledge_context(session: Session, user: CurrentUser) -> None:
         text("SELECT set_config('app.knowledge_is_admin', :is_admin, true)"),
         {"is_admin": session.info["knowledge_is_admin"]},
     )
+
+
+def get_business_query_session(
+    user: CurrentUser = Depends(require_business_user),
+) -> Generator[Session, None, None]:
+    """Shared business reads have no user-selected project or private chat scope."""
+    session = SessionLocal()
+    try:
+        _set_research_owner(session, user.id)
+        session.info["research_username"] = user.username
+        session.info["research_roles"] = tuple(user.roles)
+        sync_platform_account(session, user)
+        yield session
+    finally:
+        session.close()
 
 
 def get_knowledge_session(
@@ -4797,6 +4814,36 @@ def research_standard_fields(user: CurrentUser = Depends(require_researcher)) ->
     return public_standard_field_catalog()
 
 
+@app.get("/api/research/business-data/catalog")
+def business_data_catalog(
+    user: CurrentUser = Depends(require_business_user),
+    session: Session = Depends(get_business_query_session),
+) -> dict[str, Any]:
+    sync_platform_account(session, user)
+    catalog = load_business_catalog(session, admin="field_admin" in user.roles)
+    return {"datasets": catalog, "shared_workspace": True,
+            "shared_business_external_analysis_approved": shared_business_egress_enabled(),
+            "max_rows_per_query": 100, "private_resources_included": False}
+
+
+@app.post("/api/research/business-data/query")
+def business_data_query(
+    payload: DataQuery,
+    user: CurrentUser = Depends(require_business_user),
+    session: Session = Depends(get_business_query_session),
+) -> dict[str, Any]:
+    sync_platform_account(session, user)
+    try:
+        result = execute_business_query(session, payload, admin="field_admin" in user.roles)
+    except BusinessQueryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    record_permission_audit(session, user, "business_data_read", "dataset", payload.relation,
+                            after={"returned_rows":result["returned_rows"], "has_more":result["has_more"],
+                                   "selected_fields":payload.columns})
+    session.commit()
+    return result
+
+
 @app.get("/api/research/published-data/varieties")
 def research_published_variety_options(
     q: str = Query(default="", max_length=100),
@@ -6107,6 +6154,7 @@ async def build_dialogue_evidence(
     session: Session, plan: DialoguePlan, question: str, history: list[Any],
     *, actor: str, project_id: str, external: bool, variety_id: int | None = None,
     original_question: str = "", clarification_attempt: int = 0, skipped: bool = False,
+    provider: Any = None, admin: bool = False, model_history: list[dict] | None = None,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     """Only the admitted model plan selects public query tools; never raw SQL."""
     if plan.intent == "capabilities":
@@ -6114,6 +6162,14 @@ async def build_dialogue_evidence(
             session, question, institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
             selected_by_model=True, include_counts=plan.include_counts,
         )
+        catalog = load_business_catalog(session, admin=admin)
+        if catalog:
+            context += "\n共享业务查询目录已接入（仅为元数据，不证明某一品种数据齐全）：\n" + json.dumps({
+                "datasets": [r["dataset_id"] for r in catalog],
+                "shared_business_external_analysis_approved": shared_business_egress_enabled(),
+                "supported_operations": ["按业务表/视图查询", "按字段筛选", "按明确身份键关联", "按用户要求统计或分组"],
+                "limits": ["只读取已有评价结果，不代表已经验证评分科学性", "空表和缺失指标不得补造",
+                           "导入、治理和质量管理记录仅管理员可查", "认证、私人会话和附件不在业务目录"]}, ensure_ascii=False)
         return context, cards, []
     if plan.intent == "general":
         return "本轮是知识、方法、写作或交流问题，没有执行品种事实查询。直接回答用户的问题；一般知识不要冒充本地实测数据。", [], []
@@ -6122,12 +6178,17 @@ async def build_dialogue_evidence(
             institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED, variety_id=variety_id, selected_by_model=True)
         if result is None:
             return "本轮查询工具尚未识别可执行的明确对象或指标；请结合会话确认用户要查什么，不得声称数据库没有该数据。", [], []
-        if external and result.get("contains_private"):
+        if external and result.get("contains_private") and not shared_business_egress_enabled():
             raise ResearchAgentError("查询涉及院内私有材料，不能发送至外部模型。请使用院内本地查询或切换本地模型。")
         states = [result["context"]] if result.get("context") else []
         states.extend(result.get("extra_contexts") or [])
         if result.get("contains_private"):
-            states.append({"state": "local_data_private", "egress": "local_only"})
+            states.append({"state": "shared_business_data", "egress": "approved_shared"} if shared_business_egress_enabled()
+                          else {"state": "local_data_private", "egress": "local_only"})
+            for card in result.get("evidence") or []:
+                if card.get("type") == "institute_local" and shared_business_egress_enabled():
+                    card["type"] = "shared_business_database"
+                    card["detail"] = "院内共享业务数据，本轮只读核验；允许用于已授权模型分析。"
         if result.get("pending"):
             pending = result["pending"]
             states.extend([pending, {
@@ -6153,6 +6214,8 @@ async def build_dialogue_evidence(
                      "allow_skip": True}
             return ("当前研究任务缺少必要条件：\n" + clarification["question"] +
                     "\n请用自然语言询问最关键的缺少条件，用户可以跳过；不能在条件未明确时声称已完成推荐。", [], [state])
+    if provider is not None and plan.intent in {"database", "reference", "research_task"}:
+        return await build_business_evidence(session, question, provider=provider, admin=admin, history=model_history)
     if plan.intent == "reference":
         context, cards = build_ynaas_database_evidence(session, question)
         return context, cards, []
@@ -6850,7 +6913,7 @@ async def research_chat_stream(
                 local_question = display_content + " " + "、".join(
                     spec.name for spec in requested_traits(original_question)
                     if spec.name not in display_content)
-        trait_result = lookup_private_variety_data(
+        trait_result = None if shared_business_egress_enabled() else lookup_private_variety_data(
             session, local_question, trait_history,
             institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
             variety_id=(marker.get("variety_id") if payload.clarification_action
@@ -7044,10 +7107,10 @@ async def research_chat_stream(
     # database-tool results are checked again before any model synthesis.
     try:
         named_private = contains_named_private_material(session, payload.content,
-            institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED) if selected_provider.external else False
+            institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED) if selected_provider.external and not shared_business_egress_enabled() else False
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
-    private_evidence_selected = (named_private or contains_institute_history(trait_history or history_items)
+    private_evidence_selected = (named_private or (contains_institute_history(trait_history or history_items) and not shared_business_egress_enabled())
                                 or bool(attachment_cards or vision_blocks)) or any(
         card.get("type") == "private_knowledge" for card in knowledge_cards
     )
@@ -7244,7 +7307,8 @@ async def research_chat_stream(
                             metadata=dialogue_plan.model_dump())
             yield sse_event("status", {"label": {"capabilities": "正在核对数据来源与可用功能",
                 "variety_fact": "正在查询对应品种及审定记录", "reference": "正在检索相关基因或系谱证据",
-                "research_task": "正在核对研究条件与相关证据", "general": "正在准备回答"}[dialogue_plan.intent]})
+                "research_task": "正在核对研究条件与相关证据", "database": "正在规划并核验服务器业务数据查询",
+                "general": "正在准备回答"}[dialogue_plan.intent]})
             with SessionLocal() as query_session:
                 _set_research_owner(query_session, user.id)
                 _set_active_project(query_session, research_session.project_id)
@@ -7254,6 +7318,8 @@ async def research_chat_stream(
                     query_session, dialogue_plan, local_question, trait_history,
                     actor=audit_actor(user), project_id=research_session.project_id,
                     external=selected_provider.external,
+                    provider=selected_provider, admin="field_admin" in user.roles,
+                    model_history=safe_conversation_history,
                     variety_id=(marker.get("variety_id") if payload.clarification_action
                                 and isinstance(marker.get("variety_id"), int) else None),
                     original_question=original_question if payload.clarification_action else "",

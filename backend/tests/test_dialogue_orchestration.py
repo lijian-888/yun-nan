@@ -26,7 +26,7 @@ class DialoguePlannerTests(unittest.TestCase):
         return result, seen
 
     def test_model_not_keywords_selects_route(self):
-        for intent in ("capabilities", "general", "variety_fact", "reference", "research_task"):
+        for intent in ("capabilities", "general", "variety_fact", "reference", "research_task", "database"):
             plan = {"intent": intent, "source": "public", "include_counts": False, "needs_web": False}
             result, requests = self.run_plan(json.dumps(plan))
             self.assertEqual(result.intent, intent)

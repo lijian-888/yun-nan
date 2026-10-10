@@ -376,6 +376,7 @@ export default function ResearchAssistant({ platformContext }) {
   const [draft, setDraft] = useState("");
   const [clarificationDraft, setClarificationDraft] = useState("");
   const [notice, setNotice] = useState("");
+  const [businessPolicy, setBusinessPolicy] = useState(null);
   const [progress, setProgress] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -519,6 +520,7 @@ export default function ResearchAssistant({ platformContext }) {
       try {
         const currentUser = await request("/api/research/me");
         setUser(currentUser);
+        request("/api/research/business-data/catalog").then(setBusinessPolicy).catch(() => setBusinessPolicy(null));
         const currentSessions = await loadSessions();
         if (!currentSessions.length) await createSession();
       } catch (error) {
@@ -838,7 +840,7 @@ export default function ResearchAssistant({ platformContext }) {
 
   return <div className="research-shell">
     <aside className="research-sidebar">
-      <div className="research-brand"><div className="research-brand-mark brand-logo-mark" aria-hidden="true"><img src="/brand/longyun-agent-logo.png" alt="" /></div><div><strong>{AGENT_NAME}</strong><span>已发布标准数据 + 大模型</span></div></div>
+      <div className="research-brand"><div className="research-brand-mark brand-logo-mark" aria-hidden="true"><img src="/brand/longyun-agent-logo.png" alt="" /></div><div><strong>{AGENT_NAME}</strong><span>{businessPolicy?.shared_workspace ? "服务器共享业务数据 + 大模型" : "已发布标准数据 + 大模型"}</span></div></div>
       <section className="research-project-context" aria-label="当前机构"><span>{platformContext?.institution?.name || "云南省农业科学院"}</span></section>
       <nav className="research-workspaces" aria-label="科研工作台">
         <section className="research-workspace-group" aria-label="对话">
@@ -869,11 +871,11 @@ export default function ResearchAssistant({ platformContext }) {
     </aside>
 
     <main className={`research-main ${workspace === "knowledge" ? "knowledge-main" : workspace === "structured" ? "structured-main" : workspace === "gwas" ? "gwas-main" : workspace === "genotype" ? "genotype-main" : workspace === "skills" ? "skills-main" : workspace === "results" ? "results-main" : workspace === "intelligence" || workspace === "trial-analysis" ? "intelligence-main" : ""}`}>
-      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "私有基因型数据" : "仅查询院内已发布数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : "结构化查询"}</h1></div></header>}
+      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "基因型数据" : workspace === "assistant" && businessPolicy?.shared_workspace ? "服务器业务数据按权限共享查询" : "仅查询院内已发布数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : "结构化查询"}</h1></div></header>}
 
       {notice && <div className="assistant-notice"><span>{notice}</span><button title="关闭提示" onClick={() => setNotice("")}><X size={16} /></button></div>}
 
-      {workspace === "assistant" && <section className="assistant-boundary"><ShieldCheck size={18} /><span>院内已发布标准数据供获批人员查询；私有附件和会话按登录账号隔离。涉及病虫害、农药、施肥或种植建议时，结果需结合当地要求和专业人员意见确认。</span></section>}
+      {workspace === "assistant" && <section className="assistant-boundary"><ShieldCheck size={18} /><span>{businessPolicy?.shared_workspace ? "服务器业务数据供获批人员共享查询；管理记录仅管理员可查。" : "院内已发布标准数据供获批人员查询；"}私人附件和会话按登录账号隔离。涉及病虫害、农药、施肥或种植建议时，结果需结合当地要求和专业人员意见确认。</span></section>}
 
       {workspace === "assistant" ? <>
       <div className="chat-pane">
@@ -944,7 +946,7 @@ export default function ResearchAssistant({ platformContext }) {
             <input ref={fileInputRef} hidden type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.pptx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,.png,.jpg,.jpeg,.webp" onChange={uploadFileInput} />
             <button className="icon-button" type="button" title="上传、粘贴或拖入当前会话附件（单个不超过 10 MB）" onClick={() => fileInputRef.current?.click()} disabled={uploading}><Paperclip size={18} /></button>
             <label className="knowledge-scope-select">知识库<select value={knowledgeScope} onChange={(event) => setKnowledgeScope(event.target.value)}><option value="both">我的 + 公共</option><option value="private">仅我的</option><option value="public">仅公共</option></select></label>
-            <span>{uploading ? "正在保存附件" : sending ? "模型正在生成，可继续编辑下一条问题或添加图片；当前问题完成后再发送" : "外部模型仅接收公开或脱敏文本；私人附件需切换本地 vLLM；按 Enter 发送，Shift + Enter 换行"}</span>
+            <span>{uploading ? "正在保存附件" : sending ? "模型正在生成，可继续编辑下一条问题或添加图片；当前问题完成后再发送" : businessPolicy?.shared_business_external_analysis_approved ? "共享业务数据可用于已授权模型分析；私人附件需本地模型；Enter 发送，Shift + Enter 换行" : "外部模型仅接收公开或脱敏文本；私人附件需切换本地 vLLM；按 Enter 发送，Shift + Enter 换行"}</span>
             {sending
               ? <button className="secondary-button send-button" type="button" onClick={cancelGeneration}><Square size={15} />停止</button>
               : <button className="primary-button send-button" type="submit" disabled={!draft.trim() || uploading}><SendHorizontal size={17} />发送</button>}

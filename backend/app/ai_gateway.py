@@ -24,6 +24,11 @@ class AIEgressBlockedError(RuntimeError):
     """Raised before an external model request when sensitive data is found."""
 
 
+def shared_business_egress_enabled() -> bool:
+    """Explicit institution approval; never authorizes private uploads or secrets."""
+    return os.getenv("ALLOW_SHARED_BUSINESS_EGRESS", "false").strip().lower() == "true"
+
+
 @dataclass(frozen=True)
 class AIProviderSettings:
     provider: Literal["cherryin", "vllm"]

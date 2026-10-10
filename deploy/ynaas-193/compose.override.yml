@@ -24,6 +24,9 @@ services:
       APP_DATABASE_ROLE: ynaas_longyun_api
       INSTITUTION_DATA_ENABLED: "false"
       LOCAL_INSTITUTE_QUERY_ENABLED: "true"
+      # Approved 2026-10-10: shared business rows may be analyzed by the API model.
+      # Private attachments/conversations of other users and credentials remain blocked.
+      ALLOW_SHARED_BUSINESS_EGRESS: "true"
       DEMO_DATA_ENABLED: "false"
     mem_limit: 4g
     cpus: 3
