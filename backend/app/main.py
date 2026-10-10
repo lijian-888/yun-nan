@@ -157,7 +157,7 @@ from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_qu
 from .research_clarification import clarification_for_question, expanded_question
 from .ricedata_variety_overview import lookup_variety_overview
 from .local_variety_query import contains_institute_history, lookup_local_variety_data, source_scope
-from .research_question_routing import is_general_explanation, system_capability_answer
+from .research_question_routing import is_general_explanation, is_system_capability_question, build_system_capability_evidence
 from .ricedata_variety_identity import has_explicit_subject
 from .ricedata_trait_facts import requested_traits
 from .breeding_dossier import (
@@ -6016,6 +6016,11 @@ async def build_published_evidence_context(
     project_id: str = DEFAULT_PROJECT_ID,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Use controlled templates instead of sending a bulk database snapshot to the model."""
+    capability_evidence = build_system_capability_evidence(
+        session, question, institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
+    )
+    if capability_evidence is not None:
+        return capability_evidence
     if is_general_explanation(question):
         return "本轮为知识解释或方法讨论，不执行无对象的品种数值查询。可用一般知识回答，但不得冒充数据库实测结果。", []
     trial_context, trial_cards = build_published_trial_evidence(session, question, requested_by, project_id)
@@ -6781,17 +6786,13 @@ async def research_chat_stream(
                 local_question = display_content + " " + "、".join(
                     spec.name for spec in requested_traits(original_question)
                     if spec.name not in display_content)
-        trait_result = system_capability_answer(
-            session, local_question, institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
-        ) or lookup_local_variety_data(
+        trait_result = lookup_local_variety_data(
             session, local_question, trait_history,
             institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
             variety_id=(marker.get("variety_id") if payload.clarification_action
                         and isinstance(marker.get("variety_id"), int) else None),
         )
-        is_capability_answer = bool(trait_result and trait_result.get("response_kind") == "system_capabilities")
-        local_model = ("system_capabilities" if is_capability_answer else
-                       "ricedata_trait_lookup" if requested_traits(local_question) else "ricedata_variety_overview")
+        local_model = ("ricedata_trait_lookup" if requested_traits(local_question) else "ricedata_variety_overview")
         if trait_result is not None:
             automatic_title = auto_title_for_first_message(
                 research_session.title, payload.content, has_messages=bool(trait_history),
@@ -6812,7 +6813,7 @@ async def research_chat_stream(
                     role="user",
                     content=display_content,
                     evidence=[],
-                    operation_state=[{"state": "accepted", "label": "已接收系统能力问题" if is_capability_answer else "已接收数据库查询"},
+                    operation_state=[{"state": "accepted", "label": "已接收数据库查询"},
                                      *clarification_resolution_state],
                 )
                 session.add(user_message)
@@ -6839,7 +6840,7 @@ async def research_chat_stream(
             task.error_message = None
             session.add(task)
             session.flush()
-            operation_state = [{"state": "completed", "label": "已核对当前数据目录和查询能力" if is_capability_answer else "已按品种、审定记录和原始文本完成数据库查询"}]
+            operation_state = [{"state": "completed", "label": "已按品种、审定记录和原始文本完成数据库查询"}]
             if trait_result.get("context"):
                 operation_state.append(trait_result["context"])
             if trait_result.get("contains_private"):
@@ -6887,8 +6888,7 @@ async def research_chat_stream(
             async def stream_trait_result() -> Any:
                 if automatic_title:
                     yield sse_event("session_title", {"session_id": research_session_id, "title": automatic_title})
-                yield sse_event("status", {"label": "已核对系统查询能力" if is_capability_answer
-                                           else "已核对系统数据库中的品种及审定资料", "task_id": task.id})
+                yield sse_event("status", {"label": "已核对系统数据库中的品种及审定资料", "task_id": task.id})
                 yield sse_event("complete", {"message": response_message, "task_id": task.id})
 
             return StreamingResponse(
@@ -7037,10 +7037,9 @@ async def research_chat_stream(
         audit_actor(user),
         research_session.project_id,
     )
-    ynaas_database_context, ynaas_database_cards = build_ynaas_database_evidence(
-        session,
-        payload.content,
-    )
+    capability_question = is_system_capability_question(payload.content)
+    ynaas_database_context, ynaas_database_cards = (("", []) if capability_question else
+        build_ynaas_database_evidence(session, payload.content))
     analysis_run_id = _trial_analysis_run_id_from_context(published_context)
     attachment_context, attachment_cards = build_attachment_evidence_context(context_attachments)
     knowledge_context, knowledge_cards = build_knowledge_evidence_context(
@@ -7241,7 +7240,8 @@ async def research_chat_stream(
                 "session_id": research_session_id,
                 "title": automatic_session_title,
             })
-        yield sse_event("status", {"label": "正在读取已发布标准数据、当前会话附件和本地知识库证据"})
+        yield sse_event("status", {"label": "已核对可用功能和数据范围，正在准备模型回答" if capability_question
+                                  else "正在读取已发布标准数据、当前会话附件和本地知识库证据"})
         full_text = ""
         model_answer_started = False
         slot_acquired = False

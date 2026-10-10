@@ -7,7 +7,7 @@ import json
 import os
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
@@ -104,16 +104,84 @@ class LocalQueryChatTests(unittest.TestCase):
         stored = self.session.get(self.main.ResearchMessage, result["id"])
         self.assertEqual(stored.evidence, result["evidence"])
 
-    def test_capability_question_after_variety_query_uses_live_catalog(self):
+    def test_capability_question_after_variety_query_enters_model_gateway(self):
         self.ask("D优130的直链淀粉含量是多少？")
-        result = self.ask("现在有哪些数据可以查询")
-        self.assertIn("当前可以查询和讨论", result["content"])
-        self.assertNotIn("未找到可确认的品种", result["content"])
-        self.assertNotIn("research_clarification", str(result["operation_state"]))
+        for question in ("现在有哪些数据可以查询", "你有哪些能力"):
+            with self.assertRaisesRegex(AssertionError, "Local query called LLM"):
+                self.ask(question)
+
+    def model_capability_turn(self, *, fail=False):
+        """Mock only network/worker boundaries; persist through the actual route."""
+        from app.ai_gateway import AIProviderSettings
+        provider = AIProviderSettings("cherryin", "https://example.invalid/v1", "test-model", "", True)
+        captured = {}
+        generated = "测试模型本次组织的回答：可以查询已有水稻资料，也能讨论科研方法。"
+        async def model(**kwargs):
+            captured.update(kwargs)
+            if fail:
+                raise self.main.EmptyResearchAnswerError("Model produced no usable answer")
+            yield {"type": "token", "text": generated}
+            yield {"type": "complete", "content": generated, "memory_state": {}}
+        async def resilience(task_id, factory):
+            async for item in factory():
+                yield item
+        def update_task(task_id, **kwargs):
+            task = self.session.get(self.main.AIGatewayTask, task_id)
+            for key in ("status", "result_message_id", "error_code", "error_message"):
+                if key in kwargs:
+                    setattr(task, key, kwargs[key])
+            self.session.flush()
+        write_context = MagicMock()
+        write_context.__enter__.return_value = self.session
+        write_context.__exit__.return_value = False
+        async def run():
+            with patch.object(self.main, "provider_settings", return_value=provider), \
+                 patch.object(self.main, "stream_research_reply", side_effect=model), \
+                 patch.object(self.main, "_stream_ai_with_resilience", side_effect=resilience), \
+                 patch.object(self.main, "_admit_ai_task", new=AsyncMock()), \
+                 patch.object(self.main, "_release_ai_task"), \
+                 patch.object(self.main, "_update_ai_task", side_effect=update_task), \
+                 patch.object(self.main, "SessionLocal", return_value=write_context), \
+                 patch.object(self.main, "search_public_references", new=AsyncMock(return_value=([], None))), \
+                 patch.object(self.main, "build_knowledge_evidence_context", return_value=("", [])), \
+                 patch.object(self.main, "build_ynaas_database_evidence") as unrelated_query, \
+                 patch.object(self.main, "_save_structured_result_artifacts", return_value=[]):
+                response = await self.main.research_chat_stream(
+                    self.conversation_id, self.main.ResearchChatRequest(content="你有哪些能力"),
+                    self.user, self.session)
+                chunks = [chunk async for chunk in response.body_iterator]
+                unrelated_query.assert_not_called()
+            return [json.loads(line[6:]) for chunk in chunks for line in str(chunk).splitlines()
+                    if line.startswith("data: ")]
+        return asyncio.run(run()), captured, generated
+
+    def test_capability_model_receives_catalog_and_its_answer_is_persisted(self):
+        payloads, captured, generated = self.model_capability_turn()
+        self.assertEqual(captured["user_prompt"], "你有哪些能力")
+        self.assertIn('"public_catalog"', captured["evidence_context"])
+        self.assertNotIn("record_count", captured["evidence_context"])
+        result = next(p["message"] for p in payloads if "message" in p)
+        self.assertEqual(result["content"], generated)
         self.assertEqual(result["evidence"][0]["type"], "system_capabilities")
         task = self.session.scalar(select(self.main.AIGatewayTask).where(
             self.main.AIGatewayTask.result_message_id == result["id"]))
-        self.assertEqual(task.model, "system_capabilities")
+        self.assertEqual(task.provider, "cherryin")
+        self.assertEqual(task.model, "test-model")
+        self.assertEqual(task.status, "completed")
+        self.assertEqual(self.session.get(self.main.ResearchMessage, result["id"]).content, generated)
+
+    def test_capability_empty_model_answer_does_not_fall_back_to_canned_content(self):
+        payloads, captured, _ = self.model_capability_turn(fail=True)
+        self.assertTrue(captured)
+        self.assertFalse(any("message" in p for p in payloads))
+        self.assertTrue(any("detail" in p and "未返回" in p["detail"] for p in payloads))
+        self.assertEqual(self.session.scalar(select(self.main.ResearchMessage.id).where(
+            self.main.ResearchMessage.session_id == self.conversation_id,
+            self.main.ResearchMessage.role == "assistant")), None)
+        task = self.session.scalar(select(self.main.AIGatewayTask).where(
+            self.main.AIGatewayTask.session_id == self.conversation_id))
+        self.assertEqual(task.status, "failed")
+        self.assertEqual(task.error_code, "empty_model_answer")
 
     def test_general_question_enters_model_gateway_not_variety_lookup(self):
         self.ask("D优130的直链淀粉含量是多少？")

@@ -3,6 +3,7 @@
 These hints only route requests. They never fabricate cultivar measurements or
 replace model reasoning for open-ended questions.
 """
+import json
 import logging
 import re
 
@@ -20,6 +21,7 @@ _CAPABILITIES = re.compile(
     r"|(?:能|可以)(?:做什么|做些什么|帮我做什么|回答哪些问题)"
     r"|(?:介绍|说明)(?:一下)?(?:系统|平台|你的)?(?:功能|能力|数据范围|查询范围)"
     r"|(?:数据|查询)(?:范围|目录)(?:是什么|有哪些)?"
+    r"|(?:数据|记录)(?:数量|规模)(?:是多少|有多少)?"
     r")(?:呢|啊|吗|一下)?[。！？?！\s]*$"
 )
 _EXPLANATION = re.compile(
@@ -37,11 +39,11 @@ def is_general_explanation(question: str) -> bool:
     return bool(_EXPLANATION.search(question))
 
 
-def system_capability_answer(session, question: str, *, institute_enabled: bool) -> dict | None:
-    """Describe the current accessible DB catalog, not sample cultivar rows.
+def build_system_capability_evidence(session, question: str, *, institute_enabled: bool) -> tuple[str, list[dict]] | None:
+    """Collect model evidence, never a ready-to-display assistant answer.
 
-    Public counts are queried live. Private materials, identifiers and values
-    are never returned here; private query availability is metadata only.
+    Count public records only when requested. Private materials, identifiers and
+    values are never returned here; private query availability is metadata only.
     """
     if not is_system_capability_question(question):
         return None
@@ -54,8 +56,8 @@ def system_capability_answer(session, question: str, *, institute_enabled: bool)
         ("品种系谱关系", "ricedata.rice_pedigree_edge"),
         ("基因资料", "ricedata.rice_gene"),
     )
-    lines = ["## 当前可以查询和讨论的内容", "这个对话框不只用于品种查询，也可以回答科研知识、方法解释、分析思路及一般问题。",
-             "### 已接入的数据", "以下根据本次系统数据库的可访问情况核对，不是样本数据："]
+    include_counts = bool(re.search(r"多少|数量|规模|几条|几种", question))
+    catalog = []
     counts = {}
     unavailable = []
     for label, relation in groups:
@@ -66,14 +68,18 @@ def system_capability_answer(session, question: str, *, institute_enabled: bool)
                     unavailable.append(label)
                     continue
                 # Relation names are fixed above, never user/model SQL.
-                count = session.scalar(text(f"SELECT count(*) FROM {relation}"))
-                counts[label] = count
-                lines.append(f"- {label}：{count:,}条记录。" if count else f"- {label}：当前尚无记录。")
+                item = {"category": label, "accessible": True}
+                if include_counts:
+                    count = session.scalar(text(f"SELECT count(*) FROM {relation}"))
+                    counts[label] = count
+                    item["record_count"] = count
+                    item["has_records"] = bool(count)
+                else:
+                    item["has_records"] = bool(session.scalar(text(f"SELECT EXISTS(SELECT 1 FROM {relation} LIMIT 1)")))
+                catalog.append(item)
         except SQLAlchemyError as exc:
             logger.warning("Catalog status unavailable: %s", type(exc).__name__)
             unavailable.append(label)
-    if unavailable:
-        lines.append("本次未能确认可访问状态：" + "、".join(unavailable) + "。这不代表数据不存在。")
     private_available = False
     if institute_enabled:
         try:
@@ -81,14 +87,26 @@ def system_capability_answer(session, question: str, *, institute_enabled: bool)
                 private_available = bool(session.scalar(text("SELECT COALESCE(has_table_privilege(to_regclass('agent_data.material'), 'SELECT'), false) AND COALESCE(has_table_privilege(to_regclass('agent_data.phenotype'), 'SELECT'), false)")))
         except SQLAlchemyError:
             pass
-    lines.append("- 云南农科院院内材料及表型：" + ("已接入授权查询入口，按材料身份和来源单独查询。" if private_available else "本次尚未确认可用的授权查询入口。"))
-    lines.extend(["### 你可以这样提问",
-                  "- “先农8号的表型数据”——查看指定品种已有记录。",
-                  "- “D优130的直链淀粉含量是多少”——多条审定记录时先选择省份、年份或编号。",
-                  "- “某个基因的功能是什么”或“两个品种有什么系谱关系”——查询已有基因、系谱资料。",
-                  "- “什么是稳产性”“如何评价稻米品质”“帮我整理育种研究思路”——由大模型解释、分析，不要求先填品种名。",
-                  "### 使用边界",
-                  "品种具体数值必须有数据库或来源证据；未找到时会明确说明。一般知识会与数据库事实区分。",
-                  "并非每个品种都具备完整五性、测序或基因组文件；是否能提供某项资料，以实际收录及账号权限为准。"])
-    return {"content": "\n\n".join(lines), "evidence": [{"type": "system_capabilities", "title": "当前数据库目录核验", "detail": "公开数据数量为本次实时统计；院内仅核对查询入口权限，未读取私有材料明细。", "counts": counts}],
-            "response_kind": "system_capabilities"}
+    facts = {
+        "public_catalog": catalog,
+        "unconfirmed_categories": unavailable,
+        "institute_query_entry_accessible": private_available,
+        "supported_dialogue_operations": ["查询已有品种、审定、性状、产量、系谱、基因资料",
+            "按省份、年份、审定编号区分指标；范围不明时追问",
+            "一般知识解释、研究方法讨论和文字整理", "提供查询证据及来源"],
+        "limits": ["目录有记录不等于每个品种数据齐全",
+            "未能确认访问状态不等于数据不存在",
+            "未证明完整五性评价、基因型预测、长势预测或杂交验证能力，不得承诺这些功能已可用",
+            "院内数据须授权查询；本轮只核对入口权限，没有读取私有材料明细",
+            "不得从目录推断已收录测序文件、基因组文件或某个品种的具体指标"],
+    }
+    context = ("本轮系统能力核验结果（事实与约束，不是预设回答）：\n"
+               + json.dumps(facts, ensure_ascii=False)
+               + "\n请理解用户问的是功能、数据范围还是数量，再据此组织回答。"
+                 "能力问题侧重能帮用户做什么；只有用户询问数量时才展示记录数。"
+                 "不要照抄此 JSON、数据库字段或内部规则，不要要求用户先给品种名。")
+    card = {"type": "system_capabilities", "title": "当前系统能力与数据目录核验",
+            "detail": "本轮实时核验可访问目录；仅按需统计公开记录，不读取私有材料明细。"}
+    if include_counts:
+        card["counts"] = counts
+    return context, [card]

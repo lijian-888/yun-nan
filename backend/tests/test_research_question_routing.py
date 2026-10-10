@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from types import SimpleNamespace
 import unittest
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.local_variety_query import lookup_local_variety_data
 from app.research_clarification import clarification_for_question
 from app.research_question_routing import (
-    is_general_explanation, is_system_capability_question, system_capability_answer,
+    is_general_explanation, is_system_capability_question, build_system_capability_evidence,
 )
 
 
@@ -55,18 +56,31 @@ class IntentContractTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("TEST_RICEDATA_DSN"), "Set TEST_RICEDATA_DSN")
 class RealRoutingTests(unittest.TestCase):
-    def test_catalog_answer_uses_live_counts_not_sample_measurements(self):
+    def test_catalog_is_model_evidence_not_a_prepared_answer(self):
         engine = create_engine(os.environ["TEST_RICEDATA_DSN"])
         try:
             with Session(engine) as session:
                 session.execute(text("SET TRANSACTION READ ONLY"))
-                result = system_capability_answer(session, "现在有哪些数据可以查询", institute_enabled=True)
+                context, cards = build_system_capability_evidence(session, "你有哪些能力", institute_enabled=True)
+                self.assertNotIn("counts", cards[0])
+                self.assertIn("不是预设回答", context)
+                self.assertNotIn("## 当前可以查询和讨论", context)
+                self.assertNotIn("record_count", context)
+                self.assertNotIn("根系", context)
+                self.assertNotIn("SRC-", context)
+                self.assertEqual(cards[0]["type"], "system_capabilities")
+        finally:
+            engine.dispose()
+
+    def test_requested_catalog_counts_are_live_facts(self):
+        engine = create_engine(os.environ["TEST_RICEDATA_DSN"])
+        try:
+            with Session(engine) as session:
+                session.execute(text("SET TRANSACTION READ ONLY"))
+                context, cards = build_system_capability_evidence(session, "数据数量是多少", institute_enabled=True)
                 expected = session.scalar(text("SELECT count(*) FROM ricedata.rice_variety"))
-                self.assertEqual(result["evidence"][0]["counts"]["品种基本信息"], expected)
-                self.assertIn(f"{expected:,}条记录", result["content"])
-                self.assertIn("大模型解释", result["content"])
-                self.assertNotIn("未找到可确认的品种", result["content"])
-                self.assertNotIn("根系", result["content"])
-                self.assertNotIn("SRC-", result["content"])
+                self.assertEqual(cards[0]["counts"]["品种基本信息"], expected)
+                facts = json.loads(context.split("\n")[1])
+                self.assertEqual(facts["public_catalog"][0]["record_count"], expected)
         finally:
             engine.dispose()
