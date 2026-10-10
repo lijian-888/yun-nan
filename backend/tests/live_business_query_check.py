@@ -9,7 +9,7 @@ from app.business_data_query import load_business_catalog
 from app.research_agent import stream_research_reply
 
 
-async def main():
+async def main(only_case: int | None = None):
     provider=provider_settings()
     with SessionLocal() as session:
         shared=load_business_catalog(session)
@@ -24,7 +24,9 @@ async def main():
         ('只查院内CXCDD1447的千粒重', '24.69'),
         ('D优130在2006年福建审定的直链淀粉含量是多少', '24.1'),
     ]
-    for question,expected in cases:
+    for index,(question,expected) in enumerate(cases, 1):
+        if only_case is not None and index != only_case:
+            continue
         plan=await plan_dialogue(provider=provider,question=question,history=[])
         print('PLAN',question,plan.model_dump(),flush=True)
         with SessionLocal() as session:
@@ -40,17 +42,19 @@ async def main():
                 memory_state=None,response_guidance=dialogue_response_guidance(plan)):
             if event.get('type')!='complete':
                 continue
+            print('ANSWER',event['content'],flush=True)
             if plan.intent=='variety_fact':
                 validate_fact_measurements(event['content'],context)
             if expected:
                 assert expected in event['content'],(question,'Verified value absent from final answer')
-            print('ANSWER',event['content'],flush=True)
     print('LIVE_BUSINESS_CHECK_OK',flush=True)
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--run-live',action='store_true')
-    if not parser.parse_args().run_live:
+    parser.add_argument('--case',type=int,choices=range(1,5))
+    args=parser.parse_args()
+    if not args.run_live:
         parser.error('Use --run-live to authorize model calls')
-    asyncio.run(main())
+    asyncio.run(main(args.case))
