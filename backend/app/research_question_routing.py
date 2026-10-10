@@ -39,13 +39,15 @@ def is_general_explanation(question: str) -> bool:
     return bool(_EXPLANATION.search(question))
 
 
-def build_system_capability_evidence(session, question: str, *, institute_enabled: bool) -> tuple[str, list[dict]] | None:
+def build_system_capability_evidence(session, question: str, *, institute_enabled: bool,
+                                     selected_by_model: bool = False,
+                                     include_counts: bool | None = None) -> tuple[str, list[dict]] | None:
     """Collect model evidence, never a ready-to-display assistant answer.
 
     Count public records only when requested. Private materials, identifiers and
     values are never returned here; private query availability is metadata only.
     """
-    if not is_system_capability_question(question):
+    if not selected_by_model and not is_system_capability_question(question):
         return None
     groups = (
         ("品种基本信息", "ricedata.rice_variety"),
@@ -56,7 +58,8 @@ def build_system_capability_evidence(session, question: str, *, institute_enable
         ("品种系谱关系", "ricedata.rice_pedigree_edge"),
         ("基因资料", "ricedata.rice_gene"),
     )
-    include_counts = bool(re.search(r"多少|数量|规模|几条|几种", question))
+    if include_counts is None:
+        include_counts = bool(re.search(r"多少|数量|规模|几条|几种", question))
     catalog = []
     counts = {}
     unavailable = []
@@ -88,6 +91,8 @@ def build_system_capability_evidence(session, question: str, *, institute_enable
         except SQLAlchemyError:
             pass
     facts = {
+        "data_sources": [{"name": "国家水稻数据中心（RiceData）", "accessible": bool(catalog)},
+                         {"name": "云南省农业科学院院内治理数据", "query_entry_accessible": private_available}],
         "public_catalog": catalog,
         "unconfirmed_categories": unavailable,
         "institute_query_entry_accessible": private_available,

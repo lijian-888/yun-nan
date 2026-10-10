@@ -156,7 +156,8 @@ from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_rea
 from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_question
 from .research_clarification import clarification_for_question, expanded_question
 from .ricedata_variety_overview import lookup_variety_overview
-from .local_variety_query import contains_institute_history, lookup_local_variety_data, source_scope
+from .local_variety_query import contains_institute_history, lookup_local_variety_data, lookup_private_variety_data, source_scope
+from .dialogue_orchestration import DialoguePlan, plan_dialogue, validate_fact_measurements
 from .research_question_routing import is_general_explanation, is_system_capability_question, build_system_capability_evidence
 from .ricedata_variety_identity import has_explicit_subject
 from .ricedata_trait_facts import requested_traits
@@ -6102,6 +6103,64 @@ async def build_published_evidence_context(
     return "平台已发布标准数据（受控查询结果 JSON）：\n" + json.dumps(records, ensure_ascii=False), cards
 
 
+async def build_dialogue_evidence(
+    session: Session, plan: DialoguePlan, question: str, history: list[Any],
+    *, actor: str, project_id: str, external: bool, variety_id: int | None = None,
+    original_question: str = "", clarification_attempt: int = 0, skipped: bool = False,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Only the admitted model plan selects public query tools; never raw SQL."""
+    if plan.intent == "capabilities":
+        context, cards = build_system_capability_evidence(
+            session, question, institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
+            selected_by_model=True, include_counts=plan.include_counts,
+        )
+        return context, cards, []
+    if plan.intent == "general":
+        return "本轮是知识、方法、写作或交流问题，没有执行品种事实查询。直接回答用户的问题；一般知识不要冒充本地实测数据。", [], []
+    if plan.intent == "variety_fact":
+        result = lookup_local_variety_data(session, question, history,
+            institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED, variety_id=variety_id, selected_by_model=True)
+        if result is None:
+            return "本轮查询工具尚未识别可执行的明确对象或指标；请结合会话确认用户要查什么，不得声称数据库没有该数据。", [], []
+        if external and result.get("contains_private"):
+            raise ResearchAgentError("查询涉及院内私有材料，不能发送至外部模型。请使用院内本地查询或切换本地模型。")
+        states = [result["context"]] if result.get("context") else []
+        states.extend(result.get("extra_contexts") or [])
+        if result.get("contains_private"):
+            states.append({"state": "local_data_private", "egress": "local_only"})
+        if result.get("pending"):
+            pending = result["pending"]
+            states.extend([pending, {
+                "state": "research_clarification", "kind": "local_data",
+                "question": result["content"], "original_question": question,
+                "collected_details": "", "attempt": 1,
+                "options": pending.get("options") or [],
+                "allow_skip": pending.get("state") != "local_identity_clarification",
+                **({"variety_id": pending["variety_id"]} if isinstance(pending.get("variety_id"), int) else {}),
+            }])
+        return ("受控事实查询结果（证据，不是要求照抄的最终回答）：\n" + result["content"] +
+                "\n回答须保留指标值、单位、品种和审定年份/地区的对应关系及约数。"
+                "如结果要求选择审定或材料，只问这一必要问题，不擅自选定、取平均或从其他记录借值。"
+                "有明确数值时先直接给值，按需用紧凑表格；原文与技术元数据放在来源证据，不逐项重复。",
+                result.get("evidence") or [], states)
+    if plan.intent == "research_task" and not skipped:
+        clarification = clarification_for_question(session, original_question or question,
+            supplement=question if original_question else "", attempt=clarification_attempt)
+        if clarification:
+            state = {"state": "research_clarification", "kind": clarification["kind"],
+                     "question": clarification["question"], "original_question": original_question or question,
+                     "collected_details": "", "attempt": clarification_attempt + 1,
+                     "allow_skip": True}
+            return ("当前研究任务缺少必要条件：\n" + clarification["question"] +
+                    "\n请用自然语言询问最关键的缺少条件，用户可以跳过；不能在条件未明确时声称已完成推荐。", [], [state])
+    if plan.intent == "reference":
+        context, cards = build_ynaas_database_evidence(session, question)
+        return context, cards, []
+    published, published_cards = await build_published_evidence_context(session, question, actor, project_id)
+    reference, reference_cards = build_ynaas_database_evidence(session, question)
+    return published + "\n\n" + reference, [*published_cards, *reference_cards], []
+
+
 def build_attachment_evidence_context(
     attachments: list[ResearchAttachment],
 ) -> tuple[str, list[dict[str, Any]]]:
@@ -6757,12 +6816,10 @@ async def research_chat_stream(
         if len(effective_content) > 12000:
             raise HTTPException(413, "原问题与补充条件合计过长，请缩短补充内容后重试。")
         payload = payload.model_copy(update={"content": effective_content})
-        if not skipped and not payload.attachment_ids and marker.get("kind") != "local_data":
-            pending_clarification = clarification_for_question(
-                session, original_question, supplement=clarification_details, attempt=clarification_attempt,
-            )
-    # A specific RiceData metric is a database fact, not a generative answer.
-    # Resolve approval ambiguity in the conversation before presenting a value.
+    local_question = payload.content.strip()
+    trait_history = []
+    # Only confirmed private material queries bypass an external model for
+    # privacy. Public intent/query/clarification decisions happen after admission.
     if not payload.attachment_ids and not pending_clarification:
         trait_history = session.scalars(
             select(ResearchMessage)
@@ -6786,7 +6843,7 @@ async def research_chat_stream(
                 local_question = display_content + " " + "、".join(
                     spec.name for spec in requested_traits(original_question)
                     if spec.name not in display_content)
-        trait_result = lookup_local_variety_data(
+        trait_result = lookup_private_variety_data(
             session, local_question, trait_history,
             institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
             variety_id=(marker.get("variety_id") if payload.clarification_action
@@ -6895,103 +6952,15 @@ async def research_chat_stream(
                 stream_trait_result(), media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-    clarification = pending_clarification
-    if not clarification and not payload.clarification_action and not payload.attachment_ids:
-        clarification = clarification_for_question(session, display_content)
-    if clarification:
-        title = auto_title_for_first_message(
-            research_session.title, original_question, has_messages=bool(
-                session.scalar(select(ResearchMessage.id).where(ResearchMessage.session_id == research_session_id).limit(1))
-            ),
-        )
-        if title:
-            research_session.title = title
-        now = datetime.now(timezone.utc)
-        research_session.updated_at = now
-        user_message = (
-            session.get(ResearchMessage, existing_task.request_message_id)
-            if existing_task and existing_task.request_message_id else None
-        )
-        if not user_message:
-            user_message = ResearchMessage(
-                session_id=research_session_id,
-                project_id=research_session.project_id,
-                owner_id=user.id,
-                role="user",
-                content=display_content,
-                evidence=[],
-                operation_state=[{"state": "accepted", "label": "已接收问题"}, *clarification_resolution_state],
-            )
-            session.add(user_message)
-            session.flush()
-        task = existing_task or AIGatewayTask(
-            institution_id=account.institution_id,
-            project_id=research_session.project_id,
-            owner_id=user.id,
-            session_id=research_session_id,
-            idempotency_key=idempotency_key,
-            request_hash=request_hash,
-            provider="local_database",
-            model="research_clarification",
-        )
-        task.provider = "local_database"
-        task.model = "research_clarification"
-        task.status = "completed"
-        task.egress_classification = "local_only"
-        task.redaction_count = 0
-        task.request_message_id = user_message.id
-        task.started_at = now
-        task.completed_at = now
-        task.error_code = None
-        task.error_message = None
-        session.add(task)
-        session.flush()
-        assistant_message = ResearchMessage(
-            session_id=research_session_id,
-            project_id=research_session.project_id,
-            owner_id=user.id,
-            role="assistant",
-            content=clarification["question"],
-            evidence=[],
-            operation_state=[
-                {"state": "completed", "label": "等待补充研究条件"},
-                {"state": "research_clarification", "kind": clarification["kind"],
-                 "question": clarification["question"], "original_question": original_question,
-                 "collected_details": clarification_details, "attempt": clarification_attempt + 1,
-                 **({"variety_id": clarification["variety_id"]}
-                    if isinstance(clarification.get("variety_id"), int) else {})},
-            ],
-        )
-        session.add(assistant_message)
-        session.flush()
-        task.result_message_id = assistant_message.id
-        session.add(ResearchAudit(
-            owner_id=user.id, project_id=research_session.project_id,
-            session_id=research_session_id, action="research_clarification_requested",
-            audit_metadata={"kind": clarification["kind"], "attempt": clarification_attempt + 1},
-        ))
-        _record_ai_audit(session, task, "local_clarification_completed", "completed")
-        response_message = serialize_research_message(assistant_message)
-        session.commit()
-
-        async def stream_clarification() -> Any:
-            if title:
-                yield sse_event("session_title", {"session_id": research_session_id, "title": title})
-            yield sse_event("status", {"label": "需要补充查询范围", "task_id": task.id})
-            yield sse_event("complete", {"message": response_message, "task_id": task.id})
-
-        return StreamingResponse(
-            stream_clarification(), media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
-    # Local SQL queries and clarification must remain available if the LLM is down.
+    # Confirmed private SQL facts stay available locally; public conversation
+    # requires the model gateway, including interpretation and clarification.
     try:
         selected_provider = provider_settings()
     except AIGatewayConfigurationError as exc:
         raise HTTPException(503, str(exc)) from exc
     # A completed model answer may be followed by a short numeric-trait query.
     # Keep the database identity on that answer, independent of model memory.
-    model_variety_context = variety_context_from_question(session, payload.content.strip())
+    model_variety_context = None
     breeding_report_requested = is_breeding_report_request(payload.content)
     report_requested = is_report_request(payload.content) or breeding_report_requested
     breeding_report_context: dict[str, Any] | None = None
@@ -7031,15 +7000,10 @@ async def research_chat_stream(
         research_session.updated_at = datetime.now(timezone.utc)
     context_attachment_ids = referenced_attachment_ids(history_items) | set(current_turn_attachment_ids)
     context_attachments = [item for item in attachments if item.id in context_attachment_ids]
-    published_context, published_cards = await build_published_evidence_context(
-        session,
-        payload.content,
-        audit_actor(user),
-        research_session.project_id,
-    )
-    capability_question = is_system_capability_question(payload.content)
-    ynaas_database_context, ynaas_database_cards = (("", []) if capability_question else
-        build_ynaas_database_evidence(session, payload.content))
+    # No keyword-based public DB pre-query. The model-selected plan below
+    # determines which bounded tool runs inside the admitted task.
+    published_context, published_cards = "", []
+    ynaas_database_context, ynaas_database_cards = "", []
     analysis_run_id = _trial_analysis_run_id_from_context(published_context)
     attachment_context, attachment_cards = build_attachment_evidence_context(context_attachments)
     knowledge_context, knowledge_cards = build_knowledge_evidence_context(
@@ -7068,8 +7032,10 @@ async def research_chat_stream(
         )
     static_evidence = [*published_cards, *breeding_cards, *attachment_cards, *knowledge_cards, *ynaas_database_cards, *vision_cards]
     memory_state = research_session.memory_state or {}
-    private_evidence_selected = (contains_institute_history(history_items)
-                                or source_scope(payload.content, "unspecified") in {"institute", "both"}
+    # Naming a public institution/data source is not disclosure of its private
+    # records. Actual private history, knowledge and attachments remain blocked;
+    # database-tool results are checked again before any model synthesis.
+    private_evidence_selected = (contains_institute_history(trait_history or history_items)
                                 or bool(attachment_cards or vision_blocks)) or any(
         card.get("type") == "private_knowledge" for card in knowledge_cards
     )
@@ -7240,8 +7206,7 @@ async def research_chat_stream(
                 "session_id": research_session_id,
                 "title": automatic_session_title,
             })
-        yield sse_event("status", {"label": "已核对可用功能和数据范围，正在准备模型回答" if capability_question
-                                  else "正在读取已发布标准数据、当前会话附件和本地知识库证据"})
+        yield sse_event("status", {"label": "正在准备当前问题及授权会话证据"})
         full_text = ""
         model_answer_started = False
         slot_acquired = False
@@ -7259,15 +7224,42 @@ async def research_chat_stream(
                 "task_id": ai_task_id,
                 "queue_namespace": account.institution_id,
             })
-            evidence = list(static_evidence)
-            evidence_context = safe_static_evidence_context
+            yield sse_event("status", {"label": "正在由模型理解问题和会话上下文", "task_id": ai_task_id})
+            dialogue_plan = await plan_dialogue(provider=selected_provider, question=safe_user_prompt,
+                                                history=safe_conversation_history)
+            _raise_if_ai_task_cancelled(ai_task_id)
+            _update_ai_task(ai_task_id, status="running", action="dialogue_planned",
+                            metadata=dialogue_plan.model_dump())
+            yield sse_event("status", {"label": {"capabilities": "正在核对数据来源与可用功能",
+                "variety_fact": "正在查询对应品种及审定记录", "reference": "正在检索相关基因或系谱证据",
+                "research_task": "正在核对研究条件与相关证据", "general": "正在准备回答"}[dialogue_plan.intent]})
+            with SessionLocal() as query_session:
+                _set_research_owner(query_session, user.id)
+                _set_active_project(query_session, research_session.project_id)
+                # Recheck ownership at execution, not just at submission.
+                get_owned_research_session(query_session, research_session_id)
+                dialogue_context, dialogue_cards, dialogue_states = await build_dialogue_evidence(
+                    query_session, dialogue_plan, local_question, trait_history,
+                    actor=audit_actor(user), project_id=research_session.project_id,
+                    external=selected_provider.external,
+                    variety_id=(marker.get("variety_id") if payload.clarification_action
+                                and isinstance(marker.get("variety_id"), int) else None),
+                    original_question=original_question if payload.clarification_action else "",
+                    clarification_attempt=clarification_attempt,
+                    skipped=payload.clarification_action == "skip",
+                )
+            safe_dialogue = prepare_egress([dialogue_context], provider=selected_provider)
+            analysis_run_id = _trial_analysis_run_id_from_context(dialogue_context)
+            evidence = [*static_evidence, *dialogue_cards]
+            evidence_context = safe_static_evidence_context + "\n\n" + safe_dialogue.texts[0]
             public_web_context = ""
             if vision_blocks:
                 yield sse_event("status", {"label": f"正在准备 {len(vision_attachments)} 张本地图片供当前模型进行视觉分析"})
             public_request = resolve_public_request(safe_user_prompt, safe_conversation_history)
             page_read = bool(requested_public_pages(public_request))
             yield sse_event("status", {"label": "正在通过 Tavily 读取指定网页正文" if page_read else "正在判断是否需要检索近期可信公开资料"})
-            web_results, search_note = await search_public_references(public_request)
+            web_results, search_note = (await search_public_references(public_request)
+                                       if dialogue_plan.needs_web or page_read else ([], None))
             public_web_context = build_public_web_context(web_results, search_note, question=public_request)
             try:
                 public_egress = prepare_egress([public_web_context], provider=selected_provider)
@@ -7333,6 +7325,10 @@ async def research_chat_stream(
                     })
                     continue
                 if result["type"] == "token":
+                    # Measured facts are released only after numerical evidence
+                    # validation; do not briefly show an invented value then retract it.
+                    if dialogue_plan.intent == "variety_fact":
+                        continue
                     if not model_answer_started:
                         model_answer_started = True
                         yield sse_event("status", {"label": "正在接收大模型回答"})
@@ -7340,6 +7336,8 @@ async def research_chat_stream(
                     yield sse_event("token", {"text": result["text"]})
                     continue
 
+                if dialogue_plan.intent == "variety_fact":
+                    validate_fact_measurements(result["content"], safe_dialogue.texts[0])
                 with SessionLocal() as write_session:
                     _set_research_owner(write_session, user.id)
                     _set_active_project(write_session, research_session.project_id)
@@ -7356,6 +7354,8 @@ async def research_chat_stream(
                         evidence=evidence,
                         operation_state=[
                             {"state": "completed", "label": {"public_search_evidence": "已返回公开检索来源（模型未完成综合分析）", "public_page_unavailable": "指定网页未读取成功，已返回原因"}.get(result.get("response_mode"), "已完成大模型分析")},
+                            {"state": "dialogue_plan", **dialogue_plan.model_dump()},
+                            *dialogue_states,
                             *([model_variety_context] if model_variety_context else []),
                             *([{ "state": "web_search", "label": f"已补充 {len(web_results)} 条可信公开来源" }] if web_results else []),
                             {"state": "evidence", "label": f"已附带 {len(evidence)} 项证据"},

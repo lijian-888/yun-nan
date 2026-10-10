@@ -138,7 +138,8 @@ def _core_answer(session: Session, material: dict, question: str, traits: list) 
 
 
 def lookup_local_variety_data(session: Session, question: str, history: list[Any] | None = None,
-                              *, institute_enabled: bool = False, variety_id: int | None = None) -> dict | None:
+                              *, institute_enabled: bool = False, variety_id: int | None = None,
+                              selected_by_model: bool = False) -> dict | None:
     """Compose separate sources or ask for identity; DB faults never become not-found.
 
     Runs inside a savepoint so a failed read does not poison chat persistence.
@@ -147,9 +148,9 @@ def lookup_local_variety_data(session: Session, question: str, history: list[Any
     history = history or []
     # Keyword presence is not query intent. Keep help and scientific reasoning
     # out of the literal measurement path, even after a prior cultivar turn.
-    if is_system_capability_question(question) or is_general_explanation(question):
+    if not selected_by_model and (is_system_capability_question(question) or is_general_explanation(question)):
         return None
-    if not (_QUERY.search(question) or requested_traits(question) or _approval_followup(question)):
+    if not selected_by_model and not (_QUERY.search(question) or requested_traits(question) or _approval_followup(question)):
         return None
     if re.search(r"推荐|综合评价|排名|预测|筛选|哪些品种|所有品种|天气", question):
         return None
@@ -246,3 +247,28 @@ def lookup_local_variety_data(session: Session, question: str, history: list[Any
             "context": contexts[0] if len(contexts) == 1 else {"state": "local_query_reset", "reason": "multiple_sources"},
             "extra_contexts": [{"state": "local_source_context", "scope": scope}],
             "pending": next((r["pending"] for _, r in results if r.get("pending")), None)}
+
+
+def lookup_private_variety_data(session: Session, question: str, history: list[Any],
+                                *, institute_enabled: bool, variety_id: int | None = None) -> dict | None:
+    """Keep confirmed private material facts inside the local deployment boundary.
+
+    This is a security-only exception to model-first dialogue, not a public
+    intent router. Merely mentioning a dataset/source cannot produce an answer.
+    """
+    if not institute_enabled or source_scope(question, "both") == "public":
+        return None
+    if is_general_explanation(question) or is_system_capability_question(question):
+        return None
+    try:
+        with session.begin_nested():
+            named = _materials(session, question)
+    except SQLAlchemyError:
+        return None
+    private_followup = bool(contains_institute_history(history) and
+                            (requested_traits(question) or _approval_followup(question)))
+    if not named and not private_followup:
+        return None
+    result = lookup_local_variety_data(session, question, history,
+        institute_enabled=institute_enabled, variety_id=variety_id)
+    return result if result and result.get("contains_private") else None

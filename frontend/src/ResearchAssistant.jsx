@@ -145,15 +145,6 @@ const QUERY_OPERATORS = [
   { value: "eq", label: "等于" },
 ];
 
-const TRIAL_ANALYSIS_PROMPTS = [
-  "2025 年南昌点、标准施氮处理下，哪些材料产量更高且株高更低？",
-  "候选材料 A 与对照品种在 3 年 4 点的平均产量、相对增产、波动和有效环境数如何？",
-  "土壤 pH、有效磷、降雨量与结实率、千粒重、产量有什么关联？",
-  "标准施氮和较高施氮下，哪些材料增产明显，哪些材料倒伏风险上升？",
-  "高产材料是否同时具备较好米质？高产和抗倒伏之间是否存在取舍？",
-  "某材料 2025 年产量下降，是因为土壤、天气、施氮或病害压力变化，还是数据本身异常？",
-];
-
 function fieldLabel(field) {
   return field?.unit ? `${field.name} (${field.unit})` : field?.name || "";
 }
@@ -887,9 +878,9 @@ export default function ResearchAssistant({ platformContext }) {
       {workspace === "assistant" ? <>
       <div className="chat-pane">
       <section className="chat-log" ref={chatLogRef} onScroll={handleChatScroll}>
-        {!messages.length && <div className="chat-empty"><Bot size={28} /><h2>开始隆耘 Agent 育种对话</h2><p>数据处理员发布区域试验资料包后，可在这里直接获得同试验比较、多年多点稳定性、环境和管理影响、性状权衡及表现变差的可追溯分析。</p><div className="trial-prompt-list" aria-label="区域试验分析示例问题"><span>区域试验分析示例</span>{TRIAL_ANALYSIS_PROMPTS.map((prompt) => <button type="button" key={prompt} onClick={() => applyTrialAnalysisPrompt(prompt)}>{prompt}</button>)}</div></div>}
+        {!messages.length && <div className="chat-empty"><Bot size={28} /><h2>有什么可以帮你？</h2><p>可以查询已有水稻品种资料，也可以讨论科研知识、分析方法或整理研究思路。涉及具体数据时，会核对来源；确实需要补充条件时再向你提问。</p><div className="trial-prompt-list" aria-label="对话示例问题"><span>试着问问</span>{["你有国家水稻数据中心的数据吗？", "D优130的直链淀粉含量是多少？", "如何评价一个品种的稳产性？"].map((prompt) => <button type="button" key={prompt} onClick={() => applyTrialAnalysisPrompt(prompt)}>{prompt}</button>)}</div></div>}
         {messages.map((message) => {
-          const content = message.content || (message.streaming ? "正在调用大模型…" : "");
+          const content = message.content || (message.streaming ? progress || "正在准备问题…" : "");
           const messageAttachments = (message.evidence || []).filter((item) => item.type === "message_attachment");
           const sourceEvidence = (message.evidence || []).filter((item) => item.type !== "message_attachment");
           const clarification = (message.operation_state || []).find((item) => item?.state === "research_clarification");
@@ -948,7 +939,7 @@ export default function ResearchAssistant({ platformContext }) {
           </div>)}
         </div>
         <form className={isDragActive ? "is-dragging" : ""} onSubmit={sendQuestion} onDragEnter={(event) => { event.preventDefault(); setIsDragActive(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setIsDragActive(false); }} onDrop={dropFiles}>
-          <textarea ref={composerTextareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={sendOnEnter} onPaste={pasteImages} placeholder="输入育种科研问题；可直接粘贴、拖入或上传图片，明确要求时可生成图表或 PDF 报告" />
+          <textarea ref={composerTextareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={sendOnEnter} onPaste={pasteImages} placeholder="输入问题：查询水稻资料、讨论科研方法或整理研究思路；也可粘贴、拖入或上传图片" />
           <div className="composer-actions">
             <input ref={fileInputRef} hidden type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.pptx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,.png,.jpg,.jpeg,.webp" onChange={uploadFileInput} />
             <button className="icon-button" type="button" title="上传、粘贴或拖入当前会话附件（单个不超过 10 MB）" onClick={() => fileInputRef.current?.click()} disabled={uploading}><Paperclip size={18} /></button>
