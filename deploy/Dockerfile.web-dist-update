@@ -5,3 +5,6 @@ FROM ${BASE_IMAGE}
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 COPY frontend-prebuilt/dist /usr/share/nginx/html
+# Artifacts unpacked under a restrictive SSH umask must still be readable by
+# the Nginx worker. This directory contains only public frontend assets.
+RUN chmod -R a+rX /usr/share/nginx/html

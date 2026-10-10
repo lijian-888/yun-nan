@@ -151,7 +151,8 @@ def _history_context(session: Session, history_items: list[Any]) -> dict | None:
         return None
     for state in states:
         if state.get("state") == "ricedata_variety_context" and isinstance(state.get("variety_id"), int):
-            return {"variety_id": state["variety_id"], "trait_code": None, "approval_id": None}
+            return {"variety_id": state["variety_id"], "trait_code": None,
+                    "trait_codes": state.get("trait_codes") or [], "approval_id": state.get("approval_id")}
         if state.get("state") in {"ricedata_trait_context", "ricedata_trait_clarification"}:
             code = state.get("trait_code")
             variety_id = state.get("variety_id")
@@ -214,6 +215,8 @@ def lookup_numeric_trait(
     if not specs and not followup:
         return None
     context = _history_context(session, history_items) if history_items else None
+    if not specs and context and context.get("trait_codes"):
+        specs = [TRAIT_BY_CODE[c] for c in context["trait_codes"] if c in TRAIT_BY_CODE]
     if not specs and not context:
         return _outcome("请提供要查询的品种和具体指标；仅凭省份无法确定您想查哪条数据。")
     if not specs and context and not context.get("trait_code"):
@@ -223,10 +226,18 @@ def lookup_numeric_trait(
         for spec in specs:
             results.append(lookup_numeric_trait(session, question, history_items,
                                                 _approval_id=_approval_id, _trait_code=spec.code))
+        contexts = [item["context"] for item in results if item and item.get("context")]
+        ids = {c.get("variety_id") for c in contexts}
+        combined_context = {"state": "local_query_reset", "reason": "multiple_metrics"}
+        if len(contexts) == len(specs) and len(ids) == 1 and None not in ids:
+            approval_ids = {c.get("approval_id") for c in contexts}
+            combined_context = {"state": "ricedata_variety_context", "variety_id": next(iter(ids)),
+                                "trait_codes": [s.code for s in specs],
+                                "approval_id": next(iter(approval_ids)) if len(approval_ids) == 1 else None}
         return _outcome("\n\n".join(item["content"] for item in results if item),
                         evidence=[card for item in results if item for card in item["evidence"]],
                         pending=next((item["pending"] for item in results if item and item.get("pending")), None),
-                        context={"state": "local_query_reset", "reason": "multiple_metrics"})
+                        context=combined_context)
     spec = specs[0] if specs else TRAIT_BY_CODE.get(context["trait_code"]) if context else None
     if not spec:
         return None

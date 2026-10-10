@@ -197,6 +197,16 @@ class RealQueryIntegrationTests(unittest.TestCase):
         self.assertIn("精米率", result["content"])
         self.assertIn("整精米率", result["content"])
         self.assertNotIn("未找到", result["content"])
+        followup = lookup_numeric_trait(self.session, "直链淀粉含量呢", history(result))
+        self.assertIn("D优130", followup["content"])
+        self.assertIn("24.1%", followup["content"])
+
+    def test_multi_metric_approval_followup_retains_all_requested_metrics(self):
+        first = lookup_numeric_trait(self.session, "D优130的精米率和整精米率")
+        second = lookup_numeric_trait(self.session, "福建", history(first))
+        self.assertIn("精米率", second["content"])
+        self.assertIn("整精米率", second["content"])
+        self.assertNotIn("请说明", second["content"])
 
     def test_public_short_name_not_stolen_by_institute_numeric_label(self):
         result = lookup_local_variety_data(self.session, "国稻3号的特征特性如何？", institute_enabled=True)
