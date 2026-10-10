@@ -102,7 +102,7 @@ async def infer_controlled_query_request(
 如果问题不能由平台已发布的结构化数据回答，query_needed 必须为 false。
 对于“高产”“品质好”“抗倒伏强”“抗病”等没有明确数值阈值或评价标准的表述，query_needed 必须为 false，并用 clarification 给出一句简短中文追问。
 JSON 格式严格如下：
-{"query_needed":true,"scope":"rice_phenotype|root_phenotype","variety_names":["问题中原样出现的品种名"],"trait_codes":["目录内允许的字段编码"],"filters":[{"trait_code":"目录内允许的字段编码","operator":"eq|lt|lte|gt|gte","value":0}],"clarification":null}
+{"query_needed":true,"scope":"rice_phenotype","variety_names":["问题中原样出现的品种名"],"trait_codes":["目录内允许的字段编码"],"filters":[{"trait_code":"目录内允许的字段编码","operator":"eq|lt|lte|gt|gte","value":0}],"clarification":null}
 
 问题：""" + question + "\n\n受治理字段目录：" + json.dumps(field_catalog, ensure_ascii=False)
     request_payload = {

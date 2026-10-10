@@ -639,26 +639,6 @@ class FieldChangeRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-class RootPhenotypeObservation(Base):
-    __tablename__ = "root_phenotype_observation"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(ForeignKey("research_project.id"), default=DEFAULT_PROJECT_ID, index=True)
-    variety_id: Mapped[str] = mapped_column(ForeignKey("variety_basic.id"), index=True)
-    source_review_id: Mapped[str | None] = mapped_column(ForeignKey("source_review.id"), nullable=True)
-    trait_code: Mapped[str] = mapped_column(String(100), index=True)
-    trait_name: Mapped[str] = mapped_column(String(100))
-    trait_category: Mapped[str] = mapped_column(String(80))
-    value_numeric: Mapped[float | None] = mapped_column(Float, nullable=True)
-    value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    original_value: Mapped[str] = mapped_column(Text)
-    original_field: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    source_locator: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    template_version: Mapped[str] = mapped_column(String(30))
-    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-
 class ResearchSession(Base):
     """A private conversation owned by one authenticated researcher."""
 
@@ -1345,7 +1325,6 @@ PROJECT_SCOPED_MODELS = (
     Variety,
     SourceReview,
     PhenotypeObservation,
-    RootPhenotypeObservation,
     ResearchSession,
     ResearchMessage,
     ResearchAttachment,
@@ -1412,32 +1391,12 @@ TRAITS: dict[str, dict[str, Any]] = {
     "panicle_blast_score": {"name": "穗瘟等级", "category": "抗病性", "unit": "级", "aliases": ["穗瘟"], "patterns": [r"穗瘟(?P<value>\d+(?:\.\d+)?)级"]},
 }
 
-ROOT_TRAITS: dict[str, dict[str, Any]] = {
-    "root_length": {"name": "根长", "category": "根系形态", "unit": "cm", "aliases": ["根长", "单根长度", "主根长"]},
-    "total_root_length": {"name": "总根长", "category": "根系形态", "unit": "cm", "aliases": ["总根长", "总根系长度", "根系总长"]},
-    "root_count": {"name": "根数", "category": "根系形态", "unit": "条", "aliases": ["根数", "总根数"]},
-    "root_surface_area": {"name": "根表面积", "category": "根系形态", "unit": "cm²", "aliases": ["根表面积", "根系表面积"]},
-    "root_volume": {"name": "根体积", "category": "根系形态", "unit": "cm³", "aliases": ["根体积", "根系体积"]},
-    "average_root_diameter": {"name": "平均根径", "category": "根系形态", "unit": "mm", "aliases": ["平均根径", "根平均直径", "根径"]},
-    "root_tip_count": {"name": "根尖数", "category": "根系形态", "unit": "个", "aliases": ["根尖数", "根尖数量"]},
-    "root_dry_weight": {"name": "根干重", "category": "根系生物量", "unit": "g", "aliases": ["根干重", "根系干重"]},
-    "root_angle": {"name": "根系角度", "category": "根系构型", "unit": "°", "aliases": ["根系角度", "根角"]},
-    "root_shoot_ratio": {"name": "根冠比", "category": "根系生物量", "unit": "", "aliases": ["根冠比", "根冠质量比"]},
-}
-
-
 def national_template_fields() -> list[dict[str, Any]]:
     fields = [{"code": "variety_name", "name": "品种名称", "category": "基础信息", "unit": "", "aliases": ["品种名称", "原始材料名称", "材料名"], "required": True, "kind": "basic"}]
     for code, trait in TRAITS.items():
         fields.append({"code": code, "name": trait["name"], "category": trait["category"], "unit": trait["unit"], "aliases": trait["aliases"], "required": False, "kind": "trait"})
     return fields
 
-
-def root_template_fields() -> list[dict[str, Any]]:
-    fields = [{"code": "variety_name", "name": "材料/品种名称", "category": "基础信息", "unit": "", "aliases": ["品种名称", "材料名称", "样品名称", "材料编号"], "required": True, "kind": "basic"}]
-    for code, trait in ROOT_TRAITS.items():
-        fields.append({"code": code, "name": trait["name"], "category": trait["category"], "unit": trait["unit"], "aliases": trait["aliases"], "required": False, "kind": "trait"})
-    return fields
 
 # First-phase spreadsheet mappings. Institute-specific mappings can later be
 # persisted as versioned templates rather than changing parser code.
@@ -1583,38 +1542,6 @@ def normalize_spreadsheet_value(trait_code: str, raw_value: Any, trait_catalog: 
         suggestion = "提取病害等级；第一版不自动换算为抗性分类。"
     elif trait_code in {"total_grains_per_panicle", "grains_per_panicle", "filled_grains_per_panicle"}:
         suggestion = "已提取粒数；将结合总粒数和实粒数关系进行质量校验。"
-    elif trait_code in {"root_length", "total_root_length"}:
-        if "mm" in normalized or "毫米" in normalized:
-            value /= 10
-            suggestion = "单位换算：mm -> cm，数值除以10。"
-        elif "cm" in normalized or "厘米" in normalized:
-            suggestion = "单位已标准化：cm。"
-        elif re.search(r"(?<![a-z])m(?![a-z])", normalized) or ("米" in normalized and "厘米" not in normalized and "毫米" not in normalized):
-            value *= 100
-            suggestion = "单位换算：m -> cm，数值乘以100。"
-        else:
-            requires_confirmation = True
-            suggestion = "未识别根长单位，需人工确认。"
-    elif trait_code == "average_root_diameter":
-        if "mm" in normalized or "毫米" in normalized:
-            suggestion = "单位已标准化：mm。"
-        elif "cm" in normalized or "厘米" in normalized:
-            value *= 10
-            suggestion = "单位换算：cm -> mm，数值乘以10。"
-        else:
-            requires_confirmation = True
-            suggestion = "未识别根径单位，需人工确认。"
-    elif trait_code == "root_dry_weight":
-        if "mg" in normalized or "毫克" in normalized:
-            value /= 1000
-            suggestion = "单位换算：mg -> g，数值除以1000。"
-        elif "g" in normalized or "克" in normalized:
-            suggestion = "单位已标准化：g。"
-        else:
-            requires_confirmation = True
-            suggestion = "未识别根干重单位，需人工确认。"
-    elif trait_code in {"root_count", "root_tip_count", "root_angle", "root_shoot_ratio", "root_surface_area", "root_volume"}:
-        suggestion = f"已提取{trait_catalog[trait_code]['name']}；请核对测定方法和单位。"
 
     return {
         "observation_type": "numeric",
@@ -1896,8 +1823,7 @@ def table_to_candidates(headers: list[str], rows: list[dict[str, Any]], trait_ca
 
 async def parse_uploaded_content(filename: str, content: bytes, template: DataTemplate | None = None, template_version: TemplateVersion | None = None) -> tuple[str, str, list[dict[str, Any]]]:
     suffix = Path(filename).suffix.lower()
-    is_root_template = template and template.template_code == "rice_root_phenotype"
-    trait_catalog, header_mappings = template_parsing_catalog(template, template_version) if template and template_version else (ROOT_TRAITS if is_root_template else TRAITS, {} if is_root_template else EXCEL_HEADER_TRAIT_CODES)
+    trait_catalog, header_mappings = template_parsing_catalog(template, template_version) if template and template_version else (TRAITS, EXCEL_HEADER_TRAIT_CODES)
     if suffix == ".csv":
         text = content.decode("utf-8-sig", errors="replace")
         rows = list(csv.DictReader(io.StringIO(text)))
@@ -1917,8 +1843,6 @@ async def parse_uploaded_content(filename: str, content: bytes, template: DataTe
         text = "\n\n".join(f"[第 {index + 1} 页]\n{page.get_text()}" for index, page in enumerate(document))
         if not text.strip():
             raise HTTPException(422, "未提取到可复制文字。第一版暂不支持扫描图片型 PDF。")
-        if is_root_template:
-            raise HTTPException(422, "根系表型模板第一版仅支持 Excel 或 CSV；请保留根系 PDF 为原始来源后再补充结构化表格。")
         return "pdf", text, [{"variety_name": "", "aliases": [], "raw_title": "", "observations": extract_text_observations(text), "source_locator": "PDF 正文"}]
     if suffix in {".html", ".htm"}:
         decoded = decode_html_bytes(content)
@@ -1932,8 +1856,6 @@ async def parse_uploaded_content(filename: str, content: bytes, template: DataTe
         text, masked_digits = extract_html_text_with_markers(soup)
         text, approval_context = keep_first_approval_section(text)
         name, aliases = parse_title(raw_title)
-        if is_root_template:
-            raise HTTPException(422, "根系表型模板第一版仅支持 Excel 或 CSV。")
         candidate = {"variety_name": name, "aliases": aliases, "raw_title": raw_title, "observations": extract_text_observations(text), "source_locator": "网页正文", **extract_variety_basic_info(text)}
         parser_warnings: list[str] = []
         if resolved_digits:
@@ -1998,7 +1920,7 @@ def seed_data(session: Session) -> None:
     session.commit()
 
 
-LEGACY_INTAKE_TEMPLATE_CODES = frozenset({"rice_data_center", "rice_root_phenotype"})
+LEGACY_INTAKE_TEMPLATE_CODES = frozenset({"rice_data_center"})
 STRUCTURED_GOVERNANCE_TEMPLATE_CODES = frozenset({
     "germplasm_master",
     "pedigree_relationship",
@@ -2069,7 +1991,6 @@ def seed_templates(session: Session) -> None:
     ]
     seeds = [
         ("rice_data_center", "国家水稻数据中心信息标准", "水稻品种与地上部表型", "phenotype_observation", "用于国家水稻数据中心网页、审定资料及同类品种表型数据的归集。", national_template_fields()),
-        ("rice_root_phenotype", "水稻根系表型数据标准", "水稻根系表型", "root_phenotype_observation", "用于根系扫描、根系成像和人工测量等根系表型数据。", root_template_fields()),
         ("germplasm_master", "种质主数据模板", "种质资源主档", "breeding_material", "用于建立平台内稳定的材料编码、名称和别名，是跨文件关联的首要基础。", germplasm_fields),
         ("pedigree_relationship", "材料系谱关系模板", "亲本与后代关系", "variety_basic", "使用子代、母本和父本语义字段表达系谱关系，并兼容不同来源的原始列名。", pedigree_fields),
         ("field_trial_package", "多年多点试验资料包模板", "试验、环境、管理与表型", "trial_data_package", "用于治理试验设计、小区布局、环境管理和表型观测组成的关联资料包。", trial_fields),
@@ -2102,9 +2023,8 @@ def get_template_version(session: Session, version_id: str | None) -> tuple[Data
 
 
 def template_parsing_catalog(template: DataTemplate, version: TemplateVersion) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    base = ROOT_TRAITS if template.template_code == "rice_root_phenotype" else TRAITS
-    catalog = {code: dict(value) for code, value in base.items()}
-    header_mappings: dict[str, str] = {} if template.template_code == "rice_root_phenotype" else dict(EXCEL_HEADER_TRAIT_CODES)
+    catalog = {code: dict(value) for code, value in TRAITS.items()}
+    header_mappings: dict[str, str] = dict(EXCEL_HEADER_TRAIT_CODES)
     for field in version.field_definitions or []:
         if field.get("kind") != "trait":
             continue
@@ -2248,7 +2168,7 @@ def reject_duplicate_source(existing: SourceReview, reason: str) -> None:
     raise HTTPException(409, f"{reason}已导入：{existing.source_name}（{created_at}）。系统未创建重复来源记录。")
 
 
-def trait_identity(observation: PhenotypeObservation | RootPhenotypeObservation) -> tuple[str, str]:
+def trait_identity(observation: PhenotypeObservation) -> tuple[str, str]:
     """Current demo identity: a variety has one value for one standardized trait.
 
     Trial/year/location are not yet modeled as separate experimental contexts. Until
@@ -2293,30 +2213,12 @@ def consolidate_duplicate_traits(session: Session) -> None:
             })
             session.delete(duplicate)
 
-    root_groups: dict[tuple[str, str], list[RootPhenotypeObservation]] = {}
-    for observation in session.scalars(select(RootPhenotypeObservation).order_by(RootPhenotypeObservation.published_at.asc())).all():
-        root_groups.setdefault(trait_identity(observation), []).append(observation)
-    for records in root_groups.values():
-        if len(records) < 2:
-            continue
-        retained = min(records, key=lambda item: item.published_at)
-        for duplicate in (item for item in records if item.id != retained.id):
-            source = session.get(SourceReview, duplicate.source_review_id)
-            append_history(source, "系统", "清理重复根系标准字段", {
-                "duplicate_root_observation_id": duplicate.id,
-                "retained_root_observation_id": retained.id,
-                "variety_id": duplicate.variety_id,
-                "trait_code": duplicate.trait_code,
-                "rule": "同一品种 + 同一标准字段仅保留一条",
-            })
-            session.delete(duplicate)
     session.commit()
 
 
 def ensure_trait_uniqueness_constraints(session: Session) -> None:
     """Make the deduplication rule a PostgreSQL constraint, not a UI convention."""
     session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_phenotype_variety_trait ON phenotype_observation (variety_id, trait_code)"))
-    session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_root_phenotype_variety_trait ON root_phenotype_observation (variety_id, trait_code)"))
     session.commit()
 
 
@@ -2475,7 +2377,7 @@ class ResearchChatRequest(BaseModel):
 class ResearchStructuredQueryRequest(BaseModel):
     """User-built query parameters for the public, governed data panel."""
 
-    scope: Literal["rice_phenotype", "root_phenotype"] = "rice_phenotype"
+    scope: Literal["rice_phenotype"] = "rice_phenotype"
     variety_names: list[str] = Field(default_factory=list, max_length=20)
     trait_codes: list[str] = Field(default_factory=list, max_length=64)
     filters: list[NumericFilter] = Field(default_factory=list, max_length=6)
@@ -2944,7 +2846,7 @@ def serialize_knowledge_document(item: KnowledgeDocument, folder: KnowledgeFolde
 
 
 def public_standard_field_catalog() -> dict[str, Any]:
-    """The two queryable public templates exposed by the research assistant."""
+    """The supported public template exposed by the research assistant."""
     return {
         "datasets": [
             {
@@ -2952,12 +2854,6 @@ def public_standard_field_catalog() -> dict[str, Any]:
                 "title": "国家水稻数据中心信息标准",
                 "description": "品种基础名称加 22 个已发布水稻表型标准字段。",
                 "fields": national_template_fields(),
-            },
-            {
-                "scope": "root_phenotype",
-                "title": "水稻根系表型数据标准",
-                "description": "材料/品种名称加 10 个已发布根系表型标准字段。",
-                "fields": root_template_fields(),
             },
         ]
     }
@@ -3125,7 +3021,6 @@ def ensure_single_institution_schema(session: Session) -> None:
         "variety_basic",
         "source_review",
         "phenotype_observation",
-        "root_phenotype_observation",
         "research_session",
         "research_message",
         "research_attachment",
@@ -4896,14 +4791,14 @@ def research_query_templates(user: CurrentUser = Depends(require_researcher)) ->
 
 @app.get("/api/research/standard-fields")
 def research_standard_fields(user: CurrentUser = Depends(require_researcher)) -> dict[str, Any]:
-    """Return every field available in the two public structured-query templates."""
+    """Return every field available in the supported structured-query template."""
     return public_standard_field_catalog()
 
 
 @app.get("/api/research/published-data/varieties")
 def research_published_variety_options(
     q: str = Query(default="", max_length=100),
-    scope: Literal["rice_phenotype", "root_phenotype"] = Query(default="rice_phenotype"),
+    scope: Literal["rice_phenotype"] = Query(default="rice_phenotype"),
     x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
     user: CurrentUser = Depends(require_researcher),
     session: Session = Depends(get_research_session),
@@ -4911,17 +4806,7 @@ def research_published_variety_options(
     """Search only the published varieties that belong to the active standard template."""
     project = resolve_project_access(session, user, x_project_id)
     keyword = q.strip()
-    if scope == "root_phenotype":
-        observation_filter = """
-            EXISTS (
-                SELECT 1
-                FROM root_phenotype_observation observation
-                WHERE observation.variety_id = v.id
-                  AND observation.project_id = :project_id
-            )
-        """
-    else:
-        observation_filter = """
+    observation_filter = """
             EXISTS (
                 SELECT 1
                 FROM phenotype_observation observation
@@ -4982,7 +4867,6 @@ def research_published_data_query(
         session,
         request,
         TRAITS,
-        ROOT_TRAITS,
         project.id,
     )
     if not plan:
@@ -6134,7 +6018,7 @@ async def build_published_evidence_context(
     trial_context, trial_cards = build_published_trial_evidence(session, question, requested_by, project_id)
     if trial_context:
         return trial_context, trial_cards
-    query_plan = plan_query_from_question(session, question, TRAITS, ROOT_TRAITS, project_id)
+    query_plan = plan_query_from_question(session, question, TRAITS, project_id)
     likely_data_query = is_likely_data_query(question)
     query_planner = "规则解析"
     clarification: str | None = None
@@ -8001,8 +7885,6 @@ async def upload_import(file: UploadFile = File(...), template_version_id: str =
 async def import_url(payload: UrlImport, user: CurrentUser = Depends(require_data_processor), session: Session = Depends(get_business_project_session)) -> dict[str, Any]:
     payload.actor = audit_actor(user)
     template, version = get_template_version(session, payload.template_version_id)
-    if template.template_code == "rice_root_phenotype":
-        raise HTTPException(422, "根系表型模板请上传 Excel 或 CSV，不支持网页导入。")
     source_url = payload.url.strip()
     if ENABLE_SOURCE_DEDUPLICATION:
         existing, reason = find_duplicate_source(session, "", source_url)
@@ -8085,7 +7967,7 @@ def commit_import(source_id: str, payload: ImportCommit, user: CurrentUser = Dep
     if not source:
         raise HTTPException(404, "来源记录不存在")
     template, template_version = get_template_version(session, source.template_version_id)
-    trait_catalog = ROOT_TRAITS if template.template_code == "rice_root_phenotype" else TRAITS
+    trait_catalog = TRAITS
     name, title_aliases = parse_title(payload.variety_name or payload.raw_title)
     aliases = list(dict.fromkeys([*title_aliases, *payload.aliases]))
     if not name:
@@ -8114,12 +7996,6 @@ def commit_import(source_id: str, payload: ImportCommit, user: CurrentUser = Dep
         item.trait_code
         for item in session.scalars(select(PhenotypeObservation).where(PhenotypeObservation.variety_id == variety.id)).all()
     }
-    if template.template_code == "rice_root_phenotype":
-        existing_trait_codes.update(
-            session.scalars(
-                select(RootPhenotypeObservation.trait_code).where(RootPhenotypeObservation.variety_id == variety.id)
-            ).all()
-        )
     skipped_duplicates: list[dict[str, str]] = []
     for item in payload.observations:
         code = item.get("trait_code")
@@ -8293,24 +8169,6 @@ def publish_observations(payload: PublishRequest, user: CurrentUser = Depends(re
         if variety:
             variety.data_status = "published"
         template = session.get(DataTemplate, session.get(TemplateVersion, source.template_version_id).template_id) if source and source.template_version_id and session.get(TemplateVersion, source.template_version_id) else None
-        if template and template.template_code == "rice_root_phenotype":
-            existing_root = session.scalar(
-                select(RootPhenotypeObservation.id).where(
-                    RootPhenotypeObservation.variety_id == item.variety_id,
-                    RootPhenotypeObservation.trait_code == item.trait_code,
-                )
-            )
-            if existing_root:
-                append_history(source, payload.actor, "跳过重复根系正式字段", {
-                    "observation_id": item.id,
-                    "trait": item.trait_name,
-                    "rule": "同一品种 + 同一标准字段仅保留一条",
-                })
-                session.delete(item)
-                skipped_duplicates.append(item.id)
-                continue
-            session.add(RootPhenotypeObservation(variety_id=item.variety_id, source_review_id=item.source_review_id, trait_code=item.trait_code, trait_name=item.trait_name, trait_category=item.trait_category, value_numeric=item.value_numeric, value_text=item.value_text, unit=item.unit, original_value=item.original_value, original_field=item.original_field, source_locator=item.source_locator, template_version=item.rule_version))
-            session.delete(item)
         append_history(source, payload.actor, "发布表型记录", {"observation_id": item.id, "trait": item.trait_name, "issues": issues, "target_table": template.target_table if template else "phenotype_observation"})
         published.append(item.id)
     session.commit()

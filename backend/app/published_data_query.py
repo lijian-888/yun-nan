@@ -64,23 +64,6 @@ ORDER BY v.variety_name, p.trait_code
 LIMIT :row_limit
 """
 
-ROOT_BY_VARIETY_SQL = """
-SELECT v.id AS variety_id, v.variety_name, v.alias_names, v.variety_type,
-       v.approval_number, v.approval_year, v.suitable_region,
-       r.trait_code, r.trait_name, r.trait_category, r.value_numeric,
-       r.value_text, r.unit, r.source_review_id, r.source_locator,
-       NULL::text AS trial_year, NULL::text AS trial_location,
-       NULL::text AS evaluation_method
-FROM variety_basic v
-JOIN root_phenotype_observation r ON r.variety_id = v.id
-WHERE v.data_status = 'published'
-  AND v.project_id = :project_id AND r.project_id = :project_id
-  AND v.id = ANY(CAST(:variety_ids AS text[]))
-  AND (:trait_codes_empty OR r.trait_code = ANY(CAST(:trait_codes AS text[])))
-ORDER BY v.variety_name, r.trait_code
-LIMIT :row_limit
-"""
-
 PHENOTYPE_BY_TRAIT_SQL = """
 WITH matched_varieties AS (
     SELECT DISTINCT v.id, v.variety_name
@@ -109,33 +92,6 @@ ORDER BY v.variety_name, p.trait_code
 LIMIT :row_limit
 """
 
-ROOT_BY_TRAIT_SQL = """
-WITH matched_varieties AS (
-    SELECT DISTINCT v.id, v.variety_name
-    FROM variety_basic v
-    JOIN root_phenotype_observation r ON r.variety_id = v.id
-    WHERE v.data_status = 'published'
-      AND v.project_id = :project_id AND r.project_id = :project_id
-      AND r.trait_code = ANY(CAST(:trait_codes AS text[]))
-    ORDER BY v.variety_name
-    LIMIT :limit
-)
-SELECT v.id AS variety_id, v.variety_name, v.alias_names, v.variety_type,
-       v.approval_number, v.approval_year, v.suitable_region,
-       r.trait_code, r.trait_name, r.trait_category, r.value_numeric,
-       r.value_text, r.unit, r.source_review_id, r.source_locator,
-       NULL::text AS trial_year, NULL::text AS trial_location,
-       NULL::text AS evaluation_method
-FROM variety_basic v
-JOIN matched_varieties matched ON matched.id = v.id
-JOIN root_phenotype_observation r ON r.variety_id = v.id
-WHERE v.data_status = 'published'
-  AND v.project_id = :project_id AND r.project_id = :project_id
-  AND r.trait_code = ANY(CAST(:trait_codes AS text[]))
-ORDER BY v.variety_name, r.trait_code
-LIMIT :row_limit
-"""
-
 
 SQL_TEMPLATES = {
     "phenotype_by_variety": SqlTemplate(
@@ -145,26 +101,12 @@ SQL_TEMPLATES = {
         parameters=("variety_ids", "trait_codes", "trait_codes_empty", "row_limit"),
         sql=PHENOTYPE_BY_VARIETY_SQL.strip(),
     ),
-    "root_by_variety": SqlTemplate(
-        code="root_by_variety",
-        title="按品种查询根系表型",
-        description="查询指定品种的已发布根系表型字段。",
-        parameters=("variety_ids", "trait_codes", "trait_codes_empty", "row_limit"),
-        sql=ROOT_BY_VARIETY_SQL.strip(),
-    ),
     "phenotype_by_trait": SqlTemplate(
         code="phenotype_by_trait",
         title="按字段查询水稻表型",
         description="查询全部已发布品种的指定水稻表型字段。",
         parameters=("trait_codes", "limit", "row_limit"),
         sql=PHENOTYPE_BY_TRAIT_SQL.strip(),
-    ),
-    "root_by_trait": SqlTemplate(
-        code="root_by_trait",
-        title="按字段查询根系表型",
-        description="查询全部已发布品种的指定根系表型字段。",
-        parameters=("trait_codes", "limit", "row_limit"),
-        sql=ROOT_BY_TRAIT_SQL.strip(),
     ),
     "phenotype_filter": SqlTemplate(
         code="phenotype_filter",
@@ -187,7 +129,7 @@ class NumericFilter(BaseModel):
 class PublishedDataQuery(BaseModel):
     """The only query plan shape accepted from natural-language interpretation."""
 
-    scope: Literal["rice_phenotype", "root_phenotype"] = "rice_phenotype"
+    scope: Literal["rice_phenotype"] = "rice_phenotype"
     variety_ids: list[str] = Field(default_factory=list, max_length=MAX_VARIETY_MATCHES)
     trait_codes: list[str] = Field(default_factory=list, max_length=MAX_QUERY_TRAIT_CODES)
     filters: list[NumericFilter] = Field(default_factory=list, max_length=6)
@@ -200,7 +142,7 @@ class StructuredQueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query_needed: bool = False
-    scope: Literal["rice_phenotype", "root_phenotype"] = "rice_phenotype"
+    scope: Literal["rice_phenotype"] = "rice_phenotype"
     variety_names: list[str] = Field(default_factory=list, max_length=MAX_VARIETY_MATCHES)
     trait_codes: list[str] = Field(default_factory=list, max_length=MAX_QUERY_TRAIT_CODES)
     filters: list[NumericFilter] = Field(default_factory=list, max_length=6)
@@ -233,19 +175,17 @@ def template_catalog() -> list[dict[str, Any]]:
 
 def field_catalog_for_planner(
     rice_traits: dict[str, dict[str, Any]],
-    root_traits: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Return only governed field metadata for a structured-query planner."""
     fields = []
-    for scope, catalog in (("rice_phenotype", rice_traits), ("root_phenotype", root_traits)):
-        for code, trait in catalog.items():
-            fields.append({
-                "scope": scope,
-                "trait_code": code,
-                "name": trait.get("name"),
-                "aliases": trait.get("aliases") or [],
-                "unit": trait.get("unit") or "",
-            })
+    for code, trait in rice_traits.items():
+        fields.append({
+            "scope": "rice_phenotype",
+            "trait_code": code,
+            "name": trait.get("name"),
+            "aliases": trait.get("aliases") or [],
+            "unit": trait.get("unit") or "",
+        })
     return fields
 
 
@@ -259,13 +199,11 @@ def plan_query_from_question(
     session: Session,
     question: str,
     rice_traits: dict[str, dict[str, Any]],
-    root_traits: dict[str, dict[str, Any]],
     project_id: str,
 ) -> PublishedDataQuery | None:
     """Deterministic first-pass intent extraction from names, aliases, and field dictionary."""
     normalized_question = _normalize(question)
-    is_root_question = any(token in normalized_question for token in ("根系", "根长", "根数", "根表面积", "根体积", "根干重", "根冠比", "根角"))
-    catalog = root_traits if is_root_question else rice_traits
+    catalog = rice_traits
     trait_codes = _match_trait_codes(normalized_question, catalog)
     filters = _extract_filters(question, catalog)
     trait_codes = list(dict.fromkeys([*trait_codes, *(item.trait_code for item in filters)]))
@@ -279,7 +217,7 @@ def plan_query_from_question(
     if not matched_ids and not trait_codes and not filters:
         return None
     return PublishedDataQuery(
-        scope="root_phenotype" if is_root_question else "rice_phenotype",
+        scope="rice_phenotype",
         variety_ids=list(dict.fromkeys(matched_ids)),
         trait_codes=trait_codes,
         filters=filters,
@@ -290,13 +228,12 @@ def plan_query_from_structured_request(
     session: Session,
     request: StructuredQueryRequest,
     rice_traits: dict[str, dict[str, Any]],
-    root_traits: dict[str, dict[str, Any]],
     project_id: str,
 ) -> tuple[PublishedDataQuery | None, list[str]]:
     """Resolve an LLM-safe request against governed fields and published varieties."""
     if not request.query_needed:
         return None, []
-    catalog = root_traits if request.scope == "root_phenotype" else rice_traits
+    catalog = rice_traits
     trait_codes = [code for code in request.trait_codes if code in catalog]
     filters = [item for item in request.filters if item.trait_code in catalog]
     trait_codes = list(dict.fromkeys([*trait_codes, *(item.trait_code for item in filters)]))
@@ -321,9 +258,8 @@ def execute_published_data_query(session: Session, query: PublishedDataQuery, pr
     if query.filters:
         return _execute_filter_query(session, query, project_id)
 
-    is_root = query.scope == "root_phenotype"
     if query.variety_ids:
-        template_code = "root_by_variety" if is_root else "phenotype_by_variety"
+        template_code = "phenotype_by_variety"
         params = {
             "project_id": project_id,
             "variety_ids": query.variety_ids,
@@ -332,7 +268,7 @@ def execute_published_data_query(session: Session, query: PublishedDataQuery, pr
             "row_limit": _observation_row_limit(query),
         }
     elif query.trait_codes:
-        template_code = "root_by_trait" if is_root else "phenotype_by_trait"
+        template_code = "phenotype_by_trait"
         params = {
             "project_id": project_id,
             "trait_codes": query.trait_codes,
@@ -352,8 +288,8 @@ def execute_published_data_query(session: Session, query: PublishedDataQuery, pr
 
 
 def _execute_filter_query(session: Session, query: PublishedDataQuery, project_id: str) -> QueryExecution:
-    table_name = "root_phenotype_observation" if query.scope == "root_phenotype" else "phenotype_observation"
-    published_clause = "" if query.scope == "root_phenotype" else "AND p.publish_status = 'published'"
+    table_name = "phenotype_observation"
+    published_clause = "AND p.publish_status = 'published'"
     clauses: list[str] = ["v.data_status = 'published'", "v.project_id = :project_id"]
     params: dict[str, Any] = {"limit": query.limit, "project_id": project_id}
     if query.variety_ids:
@@ -388,7 +324,7 @@ def _execute_filter_query(session: Session, query: PublishedDataQuery, project_i
         "filters": [],
     })
     detail_execution = execute_published_data_query(session, detail_query, project_id)
-    detail_execution.template_code = "root_filter" if query.scope == "root_phenotype" else "phenotype_filter"
+    detail_execution.template_code = "phenotype_filter"
     detail_execution.parameters = _safe_parameters(params)
     return detail_execution
 
@@ -400,6 +336,9 @@ def _observation_row_limit(query: PublishedDataQuery) -> int:
 
 
 def _validated_query(query: PublishedDataQuery) -> PublishedDataQuery:
+    # model_copy/model_construct bypass Pydantic validation. Revalidate before
+    # selecting SQL so a stale or manually constructed retired scope fails closed.
+    query = PublishedDataQuery.model_validate(query.model_dump())
     allowed = set(OPERATOR_SQL)
     for item in query.filters:
         if item.operator not in allowed:
