@@ -1,6 +1,8 @@
 -- Approved single-institution shared business data. No source rows changed.
 -- Run explicitly as migration administrator, never at application startup.
 BEGIN;
+SET LOCAL lock_timeout='5s';
+SET LOCAL statement_timeout='60s';
 CREATE SCHEMA IF NOT EXISTS agent_query;
 REVOKE ALL ON SCHEMA agent_query FROM PUBLIC;
 CREATE TABLE IF NOT EXISTS agent_query.dataset_registry (

@@ -6507,6 +6507,19 @@ def referenced_attachment_ids(messages: list[ResearchMessage]) -> set[str]:
     return attachment_ids
 
 
+def has_private_conversation_evidence(session: Session, session_id: str) -> bool:
+    """Private sources may remain in memory after leaving the recent-message window.
+
+    Sharing institute business rows is not permission to export private uploads
+    or private knowledge. Check this owned conversation's provenance, not text.
+    """
+    private_types = {"private_attachment", "private_knowledge", "message_attachment", "vision_image"}
+    for cards in session.scalars(select(ResearchMessage.evidence).where(ResearchMessage.session_id == session_id)):
+        if any(isinstance(card, dict) and card.get("type") in private_types for card in (cards or [])):
+            return True
+    return False
+
+
 def is_vision_attachment(attachment: ResearchAttachment) -> bool:
     """Return whether an attachment can be sent to the native vision model."""
     return Path(attachment.file_name).suffix.lower() in VISION_IMAGE_SUFFIXES
@@ -7111,7 +7124,8 @@ async def research_chat_stream(
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     private_evidence_selected = (named_private or (contains_institute_history(trait_history or history_items) and not shared_business_egress_enabled())
-                                or bool(attachment_cards or vision_blocks)) or any(
+                                or bool(attachment_cards or vision_blocks)
+                                or (selected_provider.external and has_private_conversation_evidence(session, research_session_id))) or any(
         card.get("type") == "private_knowledge" for card in knowledge_cards
     )
     raw_egress_texts = [

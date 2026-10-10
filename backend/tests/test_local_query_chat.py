@@ -234,6 +234,32 @@ class LocalQueryChatTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 422)
         self.assertIn("不能发送", str(caught.exception.detail))
 
+    def test_shared_business_approval_does_not_export_old_private_knowledge(self):
+        from fastapi import HTTPException
+        project_id=self.session.get(self.main.ResearchSession,self.conversation_id).project_id
+        self.session.add(self.main.ResearchMessage(session_id=self.conversation_id,project_id=project_id,
+            owner_id=self.user.id,role='assistant',content='Private knowledge response',
+            evidence=[{'type':'private_knowledge','title':'Private fixture'}]))
+        for index in range(10):
+            self.session.add(self.main.ResearchMessage(session_id=self.conversation_id,project_id=project_id,
+                owner_id=self.user.id,role='user',content=f'Later turn {index}',evidence=[]))
+        self.session.commit()
+        with patch.dict(os.environ,{'ALLOW_SHARED_BUSINESS_EGRESS':'true'}):
+            with self.assertRaises(HTTPException) as caught:
+                self.model_capability_turn(question='你好',intent='general')
+        self.assertEqual(caught.exception.status_code,422)
+        self.assertIn('不能发送',str(caught.exception.detail))
+
+    def test_shared_institute_fact_passes_through_model_with_real_evidence(self):
+        with patch.dict(os.environ,{'ALLOW_SHARED_BUSINESS_EGRESS':'true'}):
+            payloads,captured,_=self.model_capability_turn(question='只查院内CXCDD1447的千粒重',
+                intent='variety_fact',copy_facts=True)
+        self.assertIn('24.69',captured['evidence_context'])
+        answer=next(p['message'] for p in payloads if 'message' in p)
+        self.assertIn('24.69',answer['content'])
+        self.assertTrue(any(s.get('state')=='shared_business_data' for s in answer['operation_state']))
+        self.assertTrue(any(c.get('type')=='shared_business_database' for c in answer['evidence']))
+
 
 if __name__ == "__main__":
     unittest.main()

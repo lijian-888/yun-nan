@@ -226,5 +226,19 @@ class RealBusinessQueryTests(unittest.TestCase):
                 asyncio.run(build_business_evidence(self.session,'院内数据',provider=provider))
             model.assert_not_called()
 
+    def test_invalid_proxy_name_can_be_corrected_but_cannot_execute(self):
+        provider=AIProviderSettings('cherryin','https://example.invalid/v1','test','',True)
+        stages=[{'relations':['ricedata.rice_variety'],'clarification':''},
+            {'queries':[{'relation':'ricedata__rice_variety'}],'clarification':''},
+            {'queries':[{'relation':'ricedata.rice_variety','columns':['variety_name'],
+                'filters':[{'field':'source_variety_id','op':'eq','value':'601360'}]}],'clarification':''}]
+        with patch('app.business_data_query.model_json_request',new=AsyncMock(side_effect=stages)) as model:
+            context,_,_=asyncio.run(build_business_evidence(self.session,'D优130的名称',provider=provider))
+        self.assertEqual(model.await_count,3)
+        self.assertIn('D优130',context)
+        schema_input=model.await_args_list[1].kwargs['data']['datasets'][0]
+        self.assertNotIn('query_view',schema_input)
+        self.assertIn('correction',model.await_args_list[2].kwargs['data'])
+
 
 if __name__=='__main__': unittest.main()
