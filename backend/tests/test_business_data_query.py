@@ -12,6 +12,7 @@ from app.ai_gateway import AIProviderSettings
 from app.business_data_query import (
     BusinessPlan, BusinessQueryError, DataQuery, build_business_evidence,
     compile_business_query, execute_business_query, load_business_catalog, _safe_value,
+    _subject_source_hints,
 )
 from app.research_agent import ResearchAgentError
 
@@ -197,6 +198,22 @@ class RealBusinessQueryTests(unittest.TestCase):
             execute_business_query(self.session,DataQuery(relation='governance.qc_issue'))
         with self.assertRaises(BusinessQueryError):
             execute_business_query(self.session,DataQuery(relation='core.genomic_asset',columns=['storage_path']))
+
+    def test_identity_register_distinguishes_public_variety_from_institute_material(self):
+        hints=_subject_source_hints(self.session,'查询D优130已有五性评价')
+        self.assertTrue(any(h['source']=='ricedata' and h['name']=='D优130' for h in hints))
+        self.assertFalse(any(h['source']=='core' and h['name']=='D优130' for h in hints))
+        provider=AIProviderSettings('cherryin','https://example.invalid/v1','test','',True)
+        stages=[{'relations':['ai.ricedata_five_trait_comprehensive_evaluation'],'clarification':''},
+            {'queries':[{'relation':'ai.ricedata_five_trait_comprehensive_evaluation',
+                'columns':['variety_name','scored_dimension_count','missing_dimensions'],
+                'filters':[{'field':'variety_name','op':'eq','value':'D优130'}]}],'clarification':''}]
+        with patch('app.business_data_query.model_json_request',new=AsyncMock(side_effect=stages)) as model:
+            context,_,_=asyncio.run(build_business_evidence(self.session,'查询D优130已有五性评价',provider=provider))
+        selection_input=model.await_args_list[0].kwargs['data']
+        self.assertTrue(any(h['source']=='ricedata' for h in selection_input['matched_subjects']))
+        self.assertFalse(any(r['dataset']=='ai.five_trait_comprehensive_evaluation' for r in selection_input['catalog']))
+        self.assertIn('D优130',context)
 
     def test_model_selection_and_plan_result_become_query_evidence(self):
         provider=AIProviderSettings('cherryin','https://example.invalid/v1','test','',True)

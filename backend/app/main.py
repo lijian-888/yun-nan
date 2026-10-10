@@ -6215,7 +6215,8 @@ async def build_dialogue_evidence(
             return ("当前研究任务缺少必要条件：\n" + clarification["question"] +
                     "\n请用自然语言询问最关键的缺少条件，用户可以跳过；不能在条件未明确时声称已完成推荐。", [], [state])
     if provider is not None and plan.intent in {"database", "reference", "research_task"}:
-        return await build_business_evidence(session, question, provider=provider, admin=admin, history=model_history)
+        return await build_business_evidence(session, question, provider=provider, admin=admin,
+                                             history=model_history, source_hint=plan.source)
     if plan.intent == "reference":
         context, cards = build_ynaas_database_evidence(session, question)
         return context, cards, []
