@@ -14,10 +14,11 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .ricedata_variety_identity import explicit_name_mention as _explicit_name_mention
+from .ricedata_variety_identity import select_name_matches
 
 
 REFERENCE_TABLES: dict[str, tuple[str, ...]] = {
+    "agent_data": ("material", "material_alias", "phenotype"),
     "ricedata": (
         "rice_variety",
         "rice_variety_approval",
@@ -41,7 +42,7 @@ REFERENCE_TABLES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-_VARIETY_MARKERS = ("品种", "材料", "审定", "系谱", "亲本", "父本", "母本", "选育", "栽培", "产量", "抗性")
+_VARIETY_MARKERS = ("品种", "材料", "审定", "系谱", "亲本", "父本", "母本", "选育", "栽培", "产量", "抗性", "特征特性", "表型", "品质")
 _VARIETY_NAME_HINT = re.compile(r"[\u4e00-\u9fff]{1,12}[A-Za-z]{0,3}\d{2,}")
 _PEDIGREE_MARKERS = ("系谱", "亲本", "父本", "母本", "杂交组合", "亲缘")
 _GENE_MARKERS = ("基因", "位点", "染色体", "注释", "功能", "qtl", "locus", "gene", "symbol", "go ")
@@ -121,15 +122,7 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
         ORDER BY char_length(regexp_replace(variety_name, '[（(].*$', '')) DESC, variety_id
         LIMIT 300
     """, {"question": question})
-    scored = []
-    for row in candidates:
-        names = (row.get("variety_name"), re.sub(r"[（(].*$", "", row.get("variety_name") or "").strip(),
-                 *(row.get("trial_names") or []), *(row.get("former_names") or []))
-        length = max((len(name.strip()) for name in names if _explicit_name_mention(question, name)), default=0)
-        if length:
-            scored.append((length, row))
-    longest = max((length for length, _ in scored), default=0)
-    varieties = [row for length, row in scored if length == longest][:8]
+    varieties = select_name_matches(question, candidates)
     total = session.scalar(text("SELECT count(*) FROM ricedata.rice_variety")) or 0
     variety_ids = [row["variety_id"] for row in varieties]
     approvals = _rows(session, """

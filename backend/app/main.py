@@ -156,6 +156,9 @@ from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_rea
 from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_question
 from .research_clarification import clarification_for_question, expanded_question
 from .ricedata_variety_overview import lookup_variety_overview
+from .local_variety_query import contains_institute_history, lookup_local_variety_data, source_scope
+from .ricedata_variety_identity import has_explicit_subject
+from .ricedata_trait_facts import requested_traits
 from .breeding_dossier import (
     BreedingDossierError,
     build_breeding_report_context,
@@ -261,6 +264,7 @@ DEMO_DATA_ENABLED = os.getenv("DEMO_DATA_ENABLED", "false").strip().lower() in {
 INSTITUTION_DATA_ENABLED = os.getenv("INSTITUTION_DATA_ENABLED", "false").strip().lower() in {
     "1", "true", "yes", "on",
 }
+LOCAL_INSTITUTE_QUERY_ENABLED = os.getenv("LOCAL_INSTITUTE_QUERY_ENABLED", "false").strip().lower() == "true"
 INSTITUTION_DATA_SETTINGS = InstitutionDataSettings.from_env()
 INSTITUTION_OBJECT_STORE = MinioInstitutionStore(INSTITUTION_DATA_SETTINGS)
 INSTITUTION_DATABASES = InstitutionDatabaseManager(INSTITUTION_DATA_SETTINGS)
@@ -6785,10 +6789,6 @@ async def research_chat_stream(
     account = sync_platform_account(session, user)
     if bool(payload.clarification_action) != bool(payload.clarification_message_id):
         raise HTTPException(422, "补充回答必须同时提供澄清消息编号和处理方式。")
-    try:
-        selected_provider = provider_settings()
-    except AIGatewayConfigurationError as exc:
-        raise HTTPException(503, str(exc)) from exc
     idempotency_key = payload.idempotency_key or str(uuid.uuid4())
     request_hash = _ai_request_hash(research_session_id, payload)
     existing_task = session.scalar(select(AIGatewayTask).where(
@@ -6865,7 +6865,7 @@ async def research_chat_stream(
         if len(effective_content) > 12000:
             raise HTTPException(413, "原问题与补充条件合计过长，请缩短补充内容后重试。")
         payload = payload.model_copy(update={"content": effective_content})
-        if not skipped and not payload.attachment_ids:
+        if not skipped and not payload.attachment_ids and marker.get("kind") != "local_data":
             pending_clarification = clarification_for_question(
                 session, original_question, supplement=clarification_details, attempt=clarification_attempt,
             )
@@ -6882,15 +6882,25 @@ async def research_chat_stream(
             trait_history = [item for item in trait_history if item.id != existing_task.request_message_id]
         overview_question = (f"{original_question}\n{clarification_details}"
                              if payload.clarification_action else display_content)
-        trait_result = lookup_variety_overview(
-            session, overview_question,
+        local_question = overview_question
+        if payload.clarification_action and marker.get("kind") == "local_data":
+            if payload.clarification_action == "skip":
+                if not marker.get("allow_skip", True):
+                    raise HTTPException(422, "材料身份尚未确认，请选择具体对象，不能跳过身份确认。")
+                local_question = original_question + " 全部审定记录"
+            elif has_explicit_subject(display_content) and not re.fullmatch(
+                r".*(?:审稻|审水稻|审种|审粳|审籼).*", display_content
+            ):
+                local_question = display_content + " " + "、".join(
+                    spec.name for spec in requested_traits(original_question)
+                    if spec.name not in display_content)
+        trait_result = lookup_local_variety_data(
+            session, local_question, trait_history,
+            institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
             variety_id=(marker.get("variety_id") if payload.clarification_action
                         and isinstance(marker.get("variety_id"), int) else None),
-            history_items=trait_history,
         )
         is_variety_overview = trait_result is not None
-        if trait_result is None:
-            trait_result = lookup_numeric_trait(session, payload.content.strip(), trait_history)
         if trait_result is not None:
             automatic_title = auto_title_for_first_message(
                 research_session.title, payload.content, has_messages=bool(trait_history),
@@ -6941,8 +6951,21 @@ async def research_chat_stream(
             operation_state = [{"state": "completed", "label": "已按品种、审定记录和原始文本完成数据库查询"}]
             if trait_result.get("context"):
                 operation_state.append(trait_result["context"])
+            if trait_result.get("contains_private"):
+                private_marker = {"state": "local_data_private", "egress": "local_only"}
+                operation_state.append(private_marker)
+                user_message.operation_state = [*(user_message.operation_state or []), private_marker]
+            operation_state.extend(trait_result.get("extra_contexts") or [])
             if trait_result.get("pending"):
                 operation_state.append(trait_result["pending"])
+                local_pending = trait_result["pending"]
+                operation_state.append({
+                    "state": "research_clarification", "kind": "local_data",
+                    "question": trait_result["content"], "original_question": local_question,
+                    "collected_details": "", "attempt": 1,
+                    "options": local_pending.get("options") or [],
+                    "allow_skip": local_pending.get("state") != "local_identity_clarification",
+                })
             assistant_message = ResearchMessage(
                 session_id=research_session_id,
                 project_id=research_session.project_id,
@@ -7070,6 +7093,11 @@ async def research_chat_stream(
             stream_clarification(), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+    # Local SQL queries and clarification must remain available if the LLM is down.
+    try:
+        selected_provider = provider_settings()
+    except AIGatewayConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
     # A completed model answer may be followed by a short numeric-trait query.
     # Keep the database identity on that answer, independent of model memory.
     model_variety_context = variety_context_from_question(session, payload.content.strip())
@@ -7150,7 +7178,9 @@ async def research_chat_stream(
         )
     static_evidence = [*published_cards, *breeding_cards, *attachment_cards, *knowledge_cards, *ynaas_database_cards, *vision_cards]
     memory_state = research_session.memory_state or {}
-    private_evidence_selected = bool(attachment_cards or vision_blocks) or any(
+    private_evidence_selected = (contains_institute_history(history_items)
+                                or source_scope(payload.content, "unspecified") in {"institute", "both"}
+                                or bool(attachment_cards or vision_blocks)) or any(
         card.get("type") == "private_knowledge" for card in knowledge_cards
     )
     raw_egress_texts = [

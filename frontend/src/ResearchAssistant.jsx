@@ -911,13 +911,20 @@ export default function ResearchAssistant({ platformContext }) {
               {message.streaming && <span className="stream-cursor" />}
               {clarificationActive && <section className="assistant-clarification" aria-label="补充研究条件">
                 <label htmlFor={`clarification-${message.id}`}><CircleHelp size={17} />补充条件后继续分析</label>
+                {!!clarification.options?.length && <div className="assistant-query-options" aria-label="选择查询对象或审定记录">
+                  {clarification.options.map((option, index) => <button type="button" className="secondary-button"
+                    key={`${option.answer}-${index}`} disabled={sending}
+                    onClick={() => void submitQuestion({ content: option.answer, clarificationMessageId: message.id, clarificationAction: "answer" })}>
+                    {option.label}
+                  </button>)}
+                </div>}
                 <textarea id={`clarification-${message.id}`} value={clarificationDraft} onChange={(event) => setClarificationDraft(event.target.value)} onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                     event.preventDefault();
                     submitClarification(message.id, "answer");
                   }
-                }} placeholder="例如：查看结实率，选 2000 年广西审定；或输入“全部表型数据”" disabled={sending} />
-                <div className="assistant-clarification-actions"><span>可只回答知道的部分；不确定可跳过。</span><button type="button" className="secondary-button" onClick={() => submitClarification(message.id, "skip")} disabled={sending}>跳过</button><button type="button" className="primary-button" onClick={() => submitClarification(message.id, "answer")} disabled={sending || !clarificationDraft.trim()}><SendHorizontal size={15} />补充并继续</button></div>
+                }} placeholder={clarification.kind === "local_data" ? "例如：2000 年广西审定；或输入完整品种名称" : "填写补充条件；不确定时可跳过"} disabled={sending} />
+                <div className="assistant-clarification-actions"><span>{clarification.allow_skip === false ? "请先确认材料身份；也可以填写完整名称或编号。" : clarification.kind === "local_data" ? "可填写省份、年份或审定编号；查看全部会按记录分别展示。" : "可只回答知道的部分；不确定时可跳过。"}</span>{clarification.allow_skip !== false && <button type="button" className="secondary-button" onClick={() => submitClarification(message.id, "skip")} disabled={sending}>{clarification.kind === "local_data" ? "查看全部" : "跳过"}</button>}<button type="button" className="primary-button" onClick={() => submitClarification(message.id, "answer")} disabled={sending || !clarificationDraft.trim()}><SendHorizontal size={15} />补充并继续</button></div>
               </section>}
               {message.role === "assistant" && message.report_available && <ReportDownloadCard message={message} onDownload={() => downloadResearchReport(message.id)} />}
               {sourceEvidence.length > 0 && <details className="evidence-card"><summary>证据与数据来源 <ChevronDown size={15} /></summary>{sourceEvidence.map((item, index) => <div className="evidence-item" key={`${item.type}-${index}`}><strong>{item.priority}. {item.title}</strong><span>{item.detail}</span>{item.query_template && <span>受控查询模板：{item.query_template}</span>}{item.query_parameters && <span>已验证参数：{JSON.stringify(item.query_parameters)}</span>}{item.query_planner && <span>参数解析方式：{item.query_planner}</span>}{item.url && <a href={item.url} target="_blank" rel="noreferrer">打开公开来源</a>}</div>)}</details>}

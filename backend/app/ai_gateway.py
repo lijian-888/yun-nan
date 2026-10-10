@@ -129,8 +129,8 @@ def prepare_egress(
         return AIEgressDecision("private_local", values, 0)
     if contains_private_material:
         raise AIEgressBlockedError(
-            "当前任务包含私人附件或私人知识库内容，按出站安全规则不能发送到外部模型。"
-            "请移除该附件，或切换到服务器内的本地 vLLM 后再试。"
+            "当前任务包含院内治理数据、私人附件或私人知识库内容（包括会话历史），按出站安全规则不能发送到外部模型。"
+            "院内指标仍可通过本地数据库查询；外部模型分析请新建不含私有数据的会话，或切换到服务器内的本地模型。"
         )
     configured_secrets = tuple(filter(None, (
         provider.api_key,

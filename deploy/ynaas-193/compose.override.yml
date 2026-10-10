@@ -23,6 +23,7 @@ services:
       MIGRATION_DATABASE_URL: postgresql+psycopg://rice:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ynaas_rice_ai
       APP_DATABASE_ROLE: ynaas_longyun_api
       INSTITUTION_DATA_ENABLED: "false"
+      LOCAL_INSTITUTE_QUERY_ENABLED: "true"
       DEMO_DATA_ENABLED: "false"
     mem_limit: 4g
     cpus: 3

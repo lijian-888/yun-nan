@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .ricedata_variety_identity import resolve_varieties
+from .ricedata_variety_identity import has_explicit_subject, resolve_varieties
 from .ricedata_trait_lookup import _history_context
 
 
@@ -52,20 +52,22 @@ def lookup_variety_overview(
     """Return local data only. Never merge observations across approvals."""
     if not wants_variety_overview(question):
         return None
-    if variety_id is None:
-        explicit = resolve_varieties(session, question)
-        if not explicit and history_items:
+    explicit = resolve_varieties(session, question)
+    if explicit:
+        variety_id = None
+    elif has_explicit_subject(question):
+        variety_id = None
+    elif variety_id is None:
+        if history_items:
             context = _history_context(session, history_items)
             variety_id = context.get("variety_id") if context else None
-    else:
-        explicit = []
     varieties = (_rows(session, """
         SELECT variety_id, variety_name, source_variety_id, source_url
         FROM ricedata.rice_variety WHERE variety_id = :variety_id
     """, {"variety_id": variety_id}) if variety_id else explicit)
     if not varieties:
         return {"content": "未找到问题中的品种。请提供完整品种名或国家水稻数据中心品种链接。",
-                "evidence": [], "context": None}
+                "evidence": [], "context": {"state": "local_query_reset", "reason": "subject_not_found"}}
     if len(varieties) != 1:
         names = "；".join(f"{row['variety_name']}（{row['source_variety_id']}）" for row in varieties)
         return {"content": f"找到多个可能的品种，请先确认：{names}", "evidence": [], "context": None}

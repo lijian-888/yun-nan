@@ -9,12 +9,13 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .ricedata_trait_facts import TRAIT_BY_CODE, requested_traits
-from .ricedata_variety_identity import resolve_varieties
+from .ricedata_trait_facts import TRAIT_BY_CODE, extract_narrative_facts, requested_traits
+from .ricedata_variety_identity import has_explicit_subject, resolve_varieties
 
 
 _YEAR = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 _REGIONS = {
+    "国家": ("国家", "国审"),
     "四川": ("四川", "川审"), "福建": ("福建", "闽审"), "云南": ("云南", "滇审"),
     "江苏": ("江苏", "苏审"), "浙江": ("浙江", "浙审"), "安徽": ("安徽", "皖审"),
     "江西": ("江西", "赣审"), "湖北": ("湖北", "鄂审"), "湖南": ("湖南", "湘审"),
@@ -22,7 +23,12 @@ _REGIONS = {
     "贵州": ("贵州", "黔审"), "重庆": ("重庆", "渝审"), "河南": ("河南", "豫审"),
     "山东": ("山东", "鲁审"), "辽宁": ("辽宁", "辽审"), "吉林": ("吉林", "吉审"),
     "黑龙江": ("黑龙江", "黑审"), "上海": ("上海", "沪审"), "河北": ("河北", "冀审"),
+    "陕西": ("陕西", "陕审"), "山西": ("山西", "晋审"), "天津": ("天津", "津审"),
+    "北京": ("北京", "京审"), "宁夏": ("宁夏", "宁审"), "甘肃": ("甘肃", "甘审"),
+    "新疆": ("新疆", "新审"), "内蒙古": ("内蒙古", "蒙审"),
 }
+
+_ALL_APPROVALS = re.compile(r"全部|所有|都看|不限审定")
 
 
 def _rows(session: Session, statement: str, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -83,6 +89,10 @@ def _approval_followup(question: str) -> bool:
     compact = re.sub(r"[\s？?。！!，,]+", "", question)
     if not compact or len(compact) > 40:
         return False
+    if re.fullmatch(r"(?:查看|看|查)?(?:全部|所有)(?:审定记录|记录|审定结果)?|都看", compact):
+        return True
+    if re.fullmatch(r"(?:那|查|看|选)?[\u4e00-\u9fff]{1,6}审[\u4e00-\u9fff]{0,5}\d{5,12}号?", compact):
+        return True
     if any(word in compact for word in ("哪些", "所有品种", "适宜种植", "种什么", "推荐", "比较", "报告", "怎么", "如何", "为什么", "有什么", "介绍")):
         return False
     region_or_year = bool(_YEAR.search(compact)) or any(
@@ -121,6 +131,9 @@ def _history_context(session: Session, history_items: list[Any]) -> dict | None:
                        if getattr(item, "role", None) == "assistant"), None)
     if last_index is None:
         return None
+    if any(state.get("state") == "local_query_reset"
+           for state in (getattr(history_items[last_index], "operation_state", None) or [])):
+        return None
     # Pre-upgrade local lookup failures carried no context. Let a retry recover
     # the immediately preceding general variety answer, but not arbitrary history.
     if "未找到问题中的品种" in str(getattr(history_items[last_index], "content", "")):
@@ -134,6 +147,8 @@ def _history_context(session: Session, history_items: list[Any]) -> dict | None:
     if not last_assistant:
         return None
     states = getattr(last_assistant, "operation_state", None) or []
+    if any(state.get("state") == "local_query_reset" for state in states):
+        return None
     for state in states:
         if state.get("state") == "ricedata_variety_context" and isinstance(state.get("variety_id"), int):
             return {"variety_id": state["variety_id"], "trait_code": None, "approval_id": None}
@@ -184,6 +199,7 @@ def lookup_numeric_trait(
     session: Session,
     question: str,
     history_items: list[Any] | None = None,
+    *, _approval_id: int | None = None, _trait_code: str | None = None,
 ) -> dict | None:
     """Return None only when this is not a specific numeric trait request.
 
@@ -193,7 +209,7 @@ def lookup_numeric_trait(
     history_items = history_items or []
     if any(word in question for word in ("比较", "推荐", "综合", "排名", "预测", "报告", "筛选", "哪些品种", "所有品种")):
         return None
-    specs = requested_traits(question)
+    specs = [TRAIT_BY_CODE[_trait_code]] if _trait_code else requested_traits(question)
     followup = _approval_followup(question)
     if not specs and not followup:
         return None
@@ -203,23 +219,31 @@ def lookup_numeric_trait(
     if not specs and context and not context.get("trait_code"):
         return _outcome("已找到上一轮讨论的品种。请说明要查询哪一个具体指标；我会按审定记录核对数值。")
     if len(specs) > 1:
-        names = "、".join(spec.name for spec in specs)
-        return _outcome(f"您提到了多个指标（{names}）。请先指定要查询哪一个具体指标；我会按审定记录给出原始数值。")
+        results = []
+        for spec in specs:
+            results.append(lookup_numeric_trait(session, question, history_items,
+                                                _approval_id=_approval_id, _trait_code=spec.code))
+        return _outcome("\n\n".join(item["content"] for item in results if item),
+                        evidence=[card for item in results if item for card in item["evidence"]],
+                        pending=next((item["pending"] for item in results if item and item.get("pending")), None),
+                        context={"state": "local_query_reset", "reason": "multiple_metrics"})
     spec = specs[0] if specs else TRAIT_BY_CODE.get(context["trait_code"]) if context else None
     if not spec:
         return None
     varieties = [] if followup and not specs else _find_varieties(session, question)
     explicit_variety = bool(varieties)
-    if not varieties and context:
+    if not varieties and context and not has_explicit_subject(question):
         varieties = _rows(session, """
             SELECT variety_id, variety_name, source_variety_id, source_url
             FROM ricedata.rice_variety WHERE variety_id = :variety_id
         """, {"variety_id": context["variety_id"]})
     if not varieties:
-        return _outcome(f"未找到问题中的品种，无法查询“{spec.name}”。请提供完整品种名或国家水稻数据中心品种链接。")
+        return _outcome(f"未找到问题中的品种，无法查询“{spec.name}”。请提供完整品种名或国家水稻数据中心品种链接。",
+                        context={"state": "local_query_reset", "reason": "subject_not_found"})
     if len(varieties) > 1:
-        return _outcome("找到多个同名或相近品种，请提供品种详情页链接或源品种编号：" +
-                        "；".join(f"{v['variety_name']}（{v['source_variety_id']}）" for v in varieties))
+        return _outcome("检测到多个品种，请分别确认查询对象或分别提问：" +
+                        "；".join(f"{v['variety_name']}（{v['source_variety_id']}）" for v in varieties),
+                        context={"state": "local_query_reset", "reason": "multiple_subjects"})
     variety = varieties[0]
     approvals = _rows(session, """
         SELECT approval_id, approval_no, approval_year, approval_region
@@ -234,7 +258,27 @@ def lookup_numeric_trait(
     # A province/year that happens to be part of a cultivar name is not an
     # approval selector (e.g. a cultivar whose name ends in 2015).
     selection_question = question.replace(str(variety["variety_name"]), "")
+    # A source name is not an approval region: "国家水稻数据中心" != 国审.
+    selection_question = re.sub(r"国家水稻数据中心|水稻数据中心|云南省农业科学院|云南农科院|RiceData",
+                                "", selection_question, flags=re.I)
     selected = _approval_selection(selection_question, approvals)
+    if _approval_id is not None:
+        selected = [row for row in approvals if row["approval_id"] == _approval_id]
+    all_requested = bool(_ALL_APPROVALS.search(selection_question)) and _approval_id is None
+    if all_requested:
+        scope = selected or approvals
+        if len(scope) > 20:
+            return _outcome("该品种审定记录超过20条，请先指定省份或年份缩小范围；不会省略后伪装成全部结果。",
+                            context={"state": "ricedata_trait_context", "variety_id": variety["variety_id"],
+                                     "trait_code": spec.code, "approval_id": None})
+        results = [lookup_numeric_trait(session, question, history_items, _approval_id=row["approval_id"],
+                                        _trait_code=spec.code)
+                   for row in scope]
+        return _outcome("以下按审定记录分别列出，审定年份不等于试验或检测年份，未跨记录取平均。\n\n" +
+                        "\n\n---\n\n".join(item["content"] for item in results),
+                        evidence=[card for item in results for card in item["evidence"]],
+                        context={"state": "ricedata_trait_context", "variety_id": variety["variety_id"],
+                                 "trait_code": spec.code, "approval_id": None})
     if context and not selected:
         ordinal = re.search(r"第\s*([一二三四五六七八九十\d]+)\s*(?:条|个)|^\s*(\d+)\s*$", selection_question)
         if ordinal:
@@ -242,16 +286,28 @@ def lookup_numeric_trait(
             index = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
                      "七": 7, "八": 8, "九": 9, "十": 10}.get(digit)
             index = index or (int(digit) if digit.isdigit() else 0)
-            if 1 <= index <= len(approvals):
-                selected = [approvals[index - 1]]
-    if not selected and context and not explicit_variety and not followup:
+            last_assistant = next((m for m in history_items if getattr(m, "role", None) == "assistant"), None)
+            pending = next((s for s in (getattr(last_assistant, "operation_state", None) or [])
+                            if s.get("state") == "ricedata_trait_clarification"
+                            and s.get("variety_id") == variety["variety_id"]), None)
+            ordered = approvals
+            if pending:
+                ids = pending.get("approval_ids")
+                if ids:
+                    ordered = [a for aid in ids for a in approvals if a["approval_id"] == aid]
+                elif pending.get("options"):
+                    ordered = [a for option in pending["options"] for a in approvals
+                               if a.get("approval_no") == option.get("answer")]
+            if 1 <= index <= len(ordered):
+                selected = [ordered[index - 1]]
+    selector_specified = bool(_YEAR.search(selection_question) or any(
+        alias in selection_question for aliases in _REGIONS.values() for alias in aliases))
+    if not selected and context and not explicit_variety and not followup and not selector_specified:
         selected = [item for item in approvals if item["approval_id"] == context.get("approval_id")]
-    if len(approvals) == 1 and not selected and (
-        _YEAR.search(selection_question) or any(alias in selection_question for aliases in _REGIONS.values() for alias in aliases)
-    ):
+    if not selected and selector_specified:
         return _outcome(
             f"未找到与您指定的年份或省份相符的审定记录。{variety['variety_name']}在本地可用的记录是："
-            f"{_approval_label(approvals[0])}。请核对后再查询{spec.name}。",
+            f"{'；'.join(_approval_label(row) for row in approvals[:20])}。请核对后再查询{spec.name}。",
             context={"state": "ricedata_trait_context", "variety_id": variety["variety_id"],
                      "trait_code": spec.code, "approval_id": None},
         )
@@ -261,9 +317,11 @@ def lookup_numeric_trait(
         labels = "\n".join(f"{index}. {_approval_label(item)}" for index, item in enumerate(options, 1))
         return _outcome(
             f"{prefix}请问您要查询 **{variety['variety_name']}的{spec.name}** 对应哪条审定记录？\n\n{labels}\n\n"
-            "请回复年份、省份或审定编号。即使某条记录没有该指标，也会明确告诉您未收录。",
+            "请回复年份、省份或审定编号，也可选择“查看全部”。即使某条记录没有该指标，也会明确告诉您未收录。",
             pending={"state": "ricedata_trait_clarification", "variety_id": variety["variety_id"],
-                     "trait_code": spec.code},
+                     "trait_code": spec.code, "approval_ids": [a["approval_id"] for a in options], "options": [
+                         {"label": _approval_label(item), "answer": str(item["approval_no"])} for item in options
+                     ] + [{"label": "查看全部", "answer": "全部审定记录"}]},
             context={"state": "ricedata_trait_context", "variety_id": variety["variety_id"],
                      "trait_code": spec.code, "approval_id": None},
         )
@@ -333,16 +391,27 @@ def lookup_numeric_trait(
         raw_sections = _rows(session, """
             SELECT a.yield_performance_text, a.cultivation_text,
                    a.suitable_area_text, a.approval_opinion_text,
-                   s.characteristics_raw_text
+                   a.variety_source_text, s.characteristics_raw_text
             FROM ricedata.rice_variety_approval a
             LEFT JOIN ricedata.rice_variety_trait_summary s ON s.approval_id = a.approval_id
             WHERE a.approval_id = :approval_id LIMIT 5
         """, {"approval_id": approval["approval_id"]})
         possible_raw: list[str] = []
+        raw_facts = []
         for section in raw_sections:
             for field, raw in section.items():
                 if not raw:
                     continue
+                for extracted in extract_narrative_facts("yield_performance_text", raw):
+                    if extracted["trait_code"] == spec.code:
+                        normalized = raw.replace("，", ",").replace("％", "%")
+                        end = extracted["source_start"] + len(extracted["value_text"])
+                        if re.match(r"[A-Za-z\d.]", normalized[end:end + 1]):
+                            # Do not truncate unsupported units or a longer decimal.
+                            continue
+                        raw_facts.append({**extracted, "source_field": field,
+                                          "source_text": extracted["source_excerpt"],
+                                          "observation_year": None, "from_raw": True})
                 for alias in sorted(spec.aliases, key=len, reverse=True):
                     at = raw.find(alias)
                     if at >= 0:
@@ -353,21 +422,23 @@ def lookup_numeric_trait(
                                        "approval_opinion_text": "审定意见"}.get(field, field)
                         possible_raw.append(f"{source_name}：{raw[max(0, at - 35):at + 130].strip()}")
                         break
-        if possible_raw:
+        facts = raw_facts
+        if not facts and possible_raw:
             detail = ("原文提到了该指标，但自动抽取未得到可靠的结构化数值；请人工核对以下原文，"
                       "不能把其中疑似数字直接当作已确认结果：\n\n" +
                       "\n".join(f"- {item}" for item in possible_raw[:3]))
-        else:
+        elif not facts:
             detail = "本地该条审定记录的已结构化数据及已保存原文中均未检索到该指标数值。"
-        return _outcome(
+        if not facts:
+            return _outcome(
             f"**{variety['variety_name']} · {label}**：未找到“{spec.name}”的已结构化可核对数值。"
             f"\n\n{detail}\n\n不能用其他省份或年份的数值代替。" +
             (f"\n\n[查看原始品种页面]({source_url})" if source_url else ""),
             evidence=[{"type": "ricedata_trait", "title": label,
                        "detail": "原文待人工核对。" if possible_raw else "该审定记录未检索到该指标；未跨审定记录借值。",
                        "priority": 1}],
-            context=resolved_context,
-        )
+                context=resolved_context,
+            )
     lines: list[str] = []
     evidence: list[dict] = []
     for fact in facts:
@@ -379,12 +450,18 @@ def lookup_numeric_trait(
             qualifier = "约"
         when = f"（{fact['observation_year']}年检测）" if fact.get("observation_year") else ""
         unit = fact.get("unit") or spec.unit
-        value = f"{qualifier}{raw_value}{unit}"
+        value = f"{raw_value}{unit}{qualifier}" if qualifier in {"以上", "以下"} else f"{qualifier}{raw_value}{unit}"
+        literal = str(fact.get("value_text") or "")
+        bound = re.search(r"以上|以下", literal)
+        if bound:
+            prefix = "约" if re.search(r"约|近|左右", literal) else ""
+            value = f"{prefix}{raw_value}{unit}{bound.group(0)}"
         source_field = {"yield_performance_text": "产量表现", "cultivation_text": "栽培技术要点",
                         "suitable_area_text": "适宜地区", "approval_opinion_text": "审定意见",
                         "variety_source_text": "品种来源"}.get(fact.get("source_field"), "特征特性")
         excerpt = str(fact.get("source_text") or "").strip()
-        lines.append(f"- **{value}**{when}，来源：{source_field}。原文：{excerpt}")
+        raw_note = "（按原文明示数值读取，尚未入结构化表）" if fact.get("from_raw") else ""
+        lines.append(f"- **{value}**{when}，来源：{source_field}{raw_note}。原文：{excerpt}")
         evidence.append({"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · {spec.name}",
                          "detail": f"{value}；{source_field}；{excerpt[:250]}", "priority": 1,
                          **({"url": source_url} if source_url else {})})

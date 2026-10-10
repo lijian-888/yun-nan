@@ -155,6 +155,8 @@ body:has(.research-shell), body:has(.assistant-loading), body:has(.auth-error) {
 .assistant-progress { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 15px 44px; color: #5f8276; font-size: 12px; }.evidence-card { margin-top: 12px; border-top: 1px solid #e2ece6; padding-top: 9px; }.evidence-card summary { display: inline-flex; align-items: center; gap: 5px; color: #19765d; cursor: pointer; font-size: 12px; }.evidence-card summary::-webkit-details-marker { display: none; }.evidence-item { display: grid; gap: 3px; margin-top: 8px; border-left: 3px solid #b7d7c8; padding: 6px 8px; background: #f7fbf8; }.evidence-item strong { color: #315e50; font-size: 12px; }.evidence-item span { color: #6a887e; font-size: 11px; line-height: 1.45; }.evidence-item a { width: fit-content; color: #19765d; font-size: 11px; text-decoration: underline; }
 .assistant-clarification { display: grid; gap: 10px; margin-top: 15px; border: 1px solid #c9dfd4; border-radius: 10px; padding: 14px; background: #f7fbf9; }
 .assistant-clarification label { display: inline-flex; align-items: center; gap: 7px; color: #245c4b; font-size: 13px; font-weight: 700; }
+.assistant-query-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.assistant-query-options button { max-width: 100%; text-align: left; white-space: normal; }
 .assistant-clarification textarea { width: 100%; min-height: 72px; border: 1px solid #bcd8ca; border-radius: 7px; padding: 10px 11px; color: #23493e; background: #fff; font: inherit; resize: vertical; }
 .assistant-clarification textarea:focus { outline: 2px solid #5ca98c; outline-offset: 1px; }
 .assistant-clarification-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
