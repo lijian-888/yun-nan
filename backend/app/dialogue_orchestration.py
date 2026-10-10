@@ -67,6 +67,29 @@ def validate_fact_measurements(answer: str, evidence: str) -> None:
         raise ResearchAgentError("模型回答出现无查询证据支持的指标数值，本轮未展示或保存回答，请重试。")
 
 
+def polish_business_answer(answer: str, question: str) -> str:
+    """Hide machine-only status tokens when a user did not request raw codes.
+
+    This is presentation cleanup only: never alter measurements, row counts,
+    provenance or the model's substantive conclusion.
+    """
+    if re.search(r"原始(?:字段|状态码)|内部(?:字段|状态码)|数据库字段名|raw\s+(?:field|code)", question, re.I):
+        return answer
+    # The model sometimes repeats an enum alongside its own Chinese gloss.
+    # Retain the explanation and remove only the redundant machine token.
+    answer = re.sub(r"\*\*([a-z][a-z0-9_]+)（([^）\n]+)）\*\*",
+                    lambda m: f"**{m.group(2)}**" if re.search(r"[\u4e00-\u9fff]", m.group(2)) else m.group(0),
+                    answer)
+    answer = re.sub(r"\*\*([a-z][a-z0-9_]+)\*\*（([^）\n]+)）",
+                    lambda m: m.group(2) if re.search(r"[\u4e00-\u9fff]", m.group(2)) else m.group(0),
+                    answer)
+    for code, label in {"linked": "已关联", "unlinked": "未关联",
+                        "not_eligible_missing_dimensions": "缺少评分维度，暂未形成综合分"}.items():
+        if code not in question:
+            answer = re.sub(rf"(?<![A-Za-z0-9_]){code}(?![A-Za-z0-9_])", label, answer)
+    return answer
+
+
 def dialogue_response_guidance(plan: DialoguePlan) -> str:
     """Presentation requirements, not answer content or model thought text."""
     base = ("请自然地与科研人员交谈，先直接回答本轮问题。不要照抄内部JSON、字段名或整段证据，"

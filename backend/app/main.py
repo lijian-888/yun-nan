@@ -159,7 +159,7 @@ from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_qu
 from .research_clarification import clarification_for_question, expanded_question
 from .ricedata_variety_overview import lookup_variety_overview
 from .local_variety_query import contains_institute_history, contains_named_private_material, lookup_local_variety_data, lookup_private_variety_data, source_scope
-from .dialogue_orchestration import DialoguePlan, plan_dialogue, validate_fact_measurements, dialogue_response_guidance
+from .dialogue_orchestration import DialoguePlan, plan_dialogue, validate_fact_measurements, dialogue_response_guidance, polish_business_answer
 from .research_question_routing import is_general_explanation, is_system_capability_question, build_system_capability_evidence
 from .ricedata_variety_identity import has_explicit_subject
 from .ricedata_trait_facts import requested_traits
@@ -7421,7 +7421,7 @@ async def research_chat_stream(
                 if result["type"] == "token":
                     # Measured facts are released only after numerical evidence
                     # validation; do not briefly show an invented value then retract it.
-                    if dialogue_plan.intent == "variety_fact":
+                    if dialogue_plan.intent in {"variety_fact", "database"}:
                         continue
                     if not model_answer_started:
                         model_answer_started = True
@@ -7432,6 +7432,8 @@ async def research_chat_stream(
 
                 if dialogue_plan.intent == "variety_fact":
                     validate_fact_measurements(result["content"], safe_dialogue.texts[0])
+                elif dialogue_plan.intent == "database":
+                    result["content"] = polish_business_answer(result["content"], payload.content.strip())
                 with SessionLocal() as write_session:
                     _set_research_owner(write_session, user.id)
                     _set_active_project(write_session, research_session.project_id)

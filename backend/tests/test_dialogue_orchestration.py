@@ -6,7 +6,7 @@ from unittest.mock import patch
 import httpx
 
 from app.ai_gateway import AIProviderSettings
-from app.dialogue_orchestration import DialoguePlan, plan_dialogue, validate_fact_measurements
+from app.dialogue_orchestration import DialoguePlan, plan_dialogue, polish_business_answer, validate_fact_measurements
 from app.research_agent import ResearchAgentError
 
 
@@ -53,6 +53,17 @@ class DialoguePlannerTests(unittest.TestCase):
                                  ("已查到实粒数105粒", "请先选择2000年或2003年审定")):
             with self.assertRaisesRegex(ResearchAgentError, "无查询证据"):
                 validate_fact_measurements(answer, evidence)
+
+    def test_business_answer_keeps_facts_but_not_internal_status_codes(self):
+        answer = ("**linked（已关联）**：180个样本；综合分标记为"
+                  "**not_eligible_missing_dimensions**（不满足综合评定条件），丰产69.43分。")
+        polished = polish_business_answer(answer, "按匹配状态统计并说明五性评价")
+        self.assertIn("已关联", polished)
+        self.assertIn("180", polished)
+        self.assertIn("69.43", polished)
+        self.assertNotIn("linked", polished)
+        self.assertNotIn("not_eligible", polished)
+        self.assertEqual(polish_business_answer(answer, "请显示原始状态码"), answer)
 
 
 if __name__ == "__main__":

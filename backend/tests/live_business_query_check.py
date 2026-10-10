@@ -3,7 +3,7 @@ import argparse
 import asyncio
 
 from app.ai_gateway import provider_settings, prepare_egress
-from app.dialogue_orchestration import plan_dialogue, dialogue_response_guidance, validate_fact_measurements
+from app.dialogue_orchestration import plan_dialogue, dialogue_response_guidance, polish_business_answer, validate_fact_measurements
 from app.main import SessionLocal, build_dialogue_evidence
 from app.business_data_query import load_business_catalog
 from app.research_agent import stream_research_reply
@@ -42,11 +42,12 @@ async def main(only_case: int | None = None):
                 memory_state=None,response_guidance=dialogue_response_guidance(plan)):
             if event.get('type')!='complete':
                 continue
-            print('ANSWER',event['content'],flush=True)
+            answer = polish_business_answer(event['content'], question) if plan.intent == 'database' else event['content']
+            print('ANSWER',answer,flush=True)
             if plan.intent=='variety_fact':
-                validate_fact_measurements(event['content'],context)
+                validate_fact_measurements(answer,context)
             if expected:
-                assert expected in event['content'],(question,'Verified value absent from final answer')
+                assert expected in answer,(question,'Verified value absent from final answer')
     print('LIVE_BUSINESS_CHECK_OK',flush=True)
 
 
