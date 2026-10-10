@@ -497,3 +497,10 @@ body:has(.research-shell), body:has(.assistant-loading), body:has(.auth-error) {
 .analysis-chart img { display: block; width: min(100%, 900px); max-height: 500px; object-fit: contain; margin: 0 auto; }
 @media (max-width: 800px) { .material-check-grid, .weight-grid, .parameter-grid, .dimension-check-grid, .weight-input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.trial-analysis-form { grid-template-columns: 1fr; }.parameter-grid { grid-column: auto; }.analysis-summary { align-items: flex-start; }.intelligence-workspace { width: calc(100% - 24px); } }
 @media (max-width: 520px) { .material-check-grid, .weight-grid, .parameter-grid { grid-template-columns: 1fr; }.control-card, .analysis-summary, .recommendation-results > header { display: grid; }.workspace-hero > svg { display: none; } }
+.assistant-table-scroll { max-width: 100%; overflow-x: auto; margin: 11px 0; border-radius: 4px; }
+.assistant-table-scroll:focus-visible { outline: 2px solid #19765d; outline-offset: 2px; }
+.assistant-table-scroll table { margin: 0; }
+.assistant-table-scroll th { white-space: nowrap; }
+.evidence-original { margin-top: 8px; }
+.evidence-original h5 { margin: 0 0 4px; color: #315e50; font-size: 12px; }
+.evidence-original p { margin: 0; color: #385c50; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }

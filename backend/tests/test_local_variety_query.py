@@ -66,7 +66,8 @@ class QueryContractTests(unittest.TestCase):
                             [], [], [{"yield_performance_text": "每穗实粒数105粒左右。"}]]
         result = lookup_numeric_trait(None, "测试材料的每穗实粒数是多少？")
         self.assertIn("约105粒/穗", result["content"])
-        self.assertIn("尚未入结构化表", result["content"])
+        self.assertIn("按原文读取，待核对", result["content"])
+        self.assertIn("每穗实粒数105粒左右", result["evidence"][0]["excerpts"][0]["text"])
         self.assertIn("产量表现", result["content"])
 
     @patch("app.ricedata_trait_lookup._find_varieties", return_value=[{"variety_id": 1, "variety_name": "测试材料"}])

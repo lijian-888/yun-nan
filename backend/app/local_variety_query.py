@@ -133,7 +133,7 @@ def _core_answer(session: Session, material: dict, question: str, traits: list) 
         lines.append("记录超过60条，当前展示前60条；请指定观测年份或原始文件编号缩小范围。")
     return {"content": "\n\n".join(lines), "context": context,
             "evidence": [{"type": "institute_local", "title": f"院内治理数据 · {name} · {mid}",
-                          "detail": f"仅本地查询；展示{min(len(observations), 60)}条原始观测，未发送外部模型。", "priority": 1}]}
+                          "detail": f"仅在系统内查询；展示{min(len(observations), 60)}条原始观测，未发送外部模型。", "priority": 1}]}
 
 
 def lookup_local_variety_data(session: Session, question: str, history: list[Any] | None = None,
@@ -222,14 +222,17 @@ def lookup_local_variety_data(session: Session, question: str, history: list[Any
                 "未找到可确认的品种或材料。请提供完整名称、院内材料编号或品种详情页链接。",
                 "evidence": [], "contains_private": scope == "institute",
                 "context": {"state": "local_query_reset", "reason": "subject_not_found"}}
-    content = "\n\n---\n\n".join(f"## {name}\n\n{result['content']}" for name, result in results)
+    content = (results[0][1]["content"] if len(results) == 1 else
+               "\n\n---\n\n".join(f"## {name}\n\n{result['content']}" for name, result in results))
+    scope_evidence = []
     if scope == "both" and not core_matches and institute_enabled and not any("院内数据库" in e for e in source_errors):
-        content += "\n\n院内治理库未找到可确认的对应材料；未按同名自动合并。"
+        scope_evidence.append({"type": "query_scope", "title": "查询范围", "priority": len(results) + 1,
+                               "detail": "已检索公开品种库及院内治理库；院内未找到可确认的对应材料，未按同名自动合并。"})
     if source_errors:
         content += "\n\n" + "\n".join(source_errors)
     contexts = [result["context"] for _, result in results if result.get("context")
                 and result["context"].get("state") != "local_query_reset"]
-    return {"content": content, "evidence": [card for _, result in results for card in result.get("evidence", [])],
+    return {"content": content, "evidence": [card for _, result in results for card in result.get("evidence", [])] + scope_evidence,
             "contains_private": bool(core_matches) or scope == "institute",
             "context": contexts[0] if len(contexts) == 1 else {"state": "local_query_reset", "reason": "multiple_sources"},
             "extra_contexts": [{"state": "local_source_context", "scope": scope}],

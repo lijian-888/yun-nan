@@ -111,6 +111,7 @@ function AssistantMarkdown({ content, streaming, suppressReportInstructions = fa
         h3: ({ children }) => <h4>{children}</h4>,
         // Preserve section spacing without showing model-generated `---` rules.
         hr: () => <div className="assistant-section-gap" aria-hidden="true" />,
+        table: ({ children }) => <div className="assistant-table-scroll" tabIndex={0} role="region" aria-label="数据表"><table>{children}</table></div>,
         a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
       }}
     >{displayContent}</ReactMarkdown></div>;
@@ -927,7 +928,7 @@ export default function ResearchAssistant({ platformContext }) {
                 <div className="assistant-clarification-actions"><span>{clarification.allow_skip === false ? "请先确认材料身份；也可以填写完整名称或编号。" : clarification.kind === "local_data" ? "可填写省份、年份或审定编号；查看全部会按记录分别展示。" : "可只回答知道的部分；不确定时可跳过。"}</span>{clarification.allow_skip !== false && <button type="button" className="secondary-button" onClick={() => submitClarification(message.id, "skip")} disabled={sending}>{clarification.kind === "local_data" ? "查看全部" : "跳过"}</button>}<button type="button" className="primary-button" onClick={() => submitClarification(message.id, "answer")} disabled={sending || !clarificationDraft.trim()}><SendHorizontal size={15} />补充并继续</button></div>
               </section>}
               {message.role === "assistant" && message.report_available && <ReportDownloadCard message={message} onDownload={() => downloadResearchReport(message.id)} />}
-              {sourceEvidence.length > 0 && <details className="evidence-card"><summary>证据与数据来源 <ChevronDown size={15} /></summary>{sourceEvidence.map((item, index) => <div className="evidence-item" key={`${item.type}-${index}`}><strong>{item.priority}. {item.title}</strong><span>{item.detail}</span>{item.query_template && <span>受控查询模板：{item.query_template}</span>}{item.query_parameters && <span>已验证参数：{JSON.stringify(item.query_parameters)}</span>}{item.query_planner && <span>参数解析方式：{item.query_planner}</span>}{item.url && <a href={item.url} target="_blank" rel="noreferrer">打开公开来源</a>}</div>)}</details>}
+              {sourceEvidence.length > 0 && <details className="evidence-card"><summary>{sourceEvidence.some((item) => item.excerpts?.length) ? "查看原文与来源" : "证据与数据来源"} <ChevronDown size={15} /></summary>{sourceEvidence.map((item, index) => <div className="evidence-item" key={`${item.type}-${index}`}><strong>{index + 1}. {item.title}</strong><span>{item.detail}</span>{Array.isArray(item.excerpts) && item.excerpts.map((excerpt, excerptIndex) => <section className="evidence-original" key={excerptIndex}><h5>{excerpt.title}</h5><p>{excerpt.text}</p></section>)}{item.query_template && <span>受控查询模板：{item.query_template}</span>}{item.query_parameters && <span>已验证参数：{JSON.stringify(item.query_parameters)}</span>}{item.query_planner && <span>参数解析方式：{item.query_planner}</span>}{item.url && <a href={item.url} target="_blank" rel="noreferrer">查看来源网页</a>}</div>)}</details>}
             </div>
           </article>;
         })}

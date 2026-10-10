@@ -94,6 +94,16 @@ class LocalQueryChatTests(unittest.TestCase):
         for message in messages:
             self.assertTrue(any(s["state"] == "local_data_private" for s in message.operation_state))
 
+    def test_readable_overview_and_originals_survive_sse_and_persistence(self):
+        result = self.ask("先农8号的全部表型数据")
+        self.assertIn("| 性状 | 结果 |", result["content"])
+        self.assertNotIn("regional_trial", result["content"])
+        self.assertNotIn("特征特性原文", result["content"])
+        source = next(card for card in result["evidence"] if card["type"] == "ricedata_variety")
+        self.assertIn("株高102.7厘米", source["excerpts"][0]["text"])
+        stored = self.session.get(self.main.ResearchMessage, result["id"])
+        self.assertEqual(stored.evidence, result["evidence"])
+
 
 if __name__ == "__main__":
     unittest.main()

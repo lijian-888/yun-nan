@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .ricedata_trait_facts import TRAIT_BY_CODE, extract_narrative_facts, requested_traits
 from .ricedata_variety_identity import has_explicit_subject, resolve_varieties
+from .rice_query_presentation import display_value, source_excerpts, table, trial_label, yield_change, yield_year
 
 
 _YEAR = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
@@ -263,7 +264,7 @@ def lookup_numeric_trait(
         ORDER BY approval_year, approval_region, approval_id
     """, {"variety_id": variety["variety_id"]})
     if not approvals:
-        return _outcome(f"找到品种 {variety['variety_name']}，但本地没有审定记录，无法核对“{spec.name}”的具体值。",
+        return _outcome(f"找到品种 {variety['variety_name']}，但系统数据库未收录审定记录，无法核对“{spec.name}”的具体值。",
                         context={"state": "ricedata_trait_context", "variety_id": variety["variety_id"],
                                  "trait_code": spec.code, "approval_id": None})
     # A province/year that happens to be part of a cultivar name is not an
@@ -317,7 +318,7 @@ def lookup_numeric_trait(
         selected = [item for item in approvals if item["approval_id"] == context.get("approval_id")]
     if not selected and selector_specified:
         return _outcome(
-            f"未找到与您指定的年份或省份相符的审定记录。{variety['variety_name']}在本地可用的记录是："
+            f"未找到与您指定的年份或省份相符的审定记录。{variety['variety_name']}在系统数据库可查询的记录是："
             f"{'；'.join(_approval_label(row) for row in approvals[:20])}。请核对后再查询{spec.name}。",
             context={"state": "ricedata_trait_context", "variety_id": variety["variety_id"],
                      "trait_code": spec.code, "approval_id": None},
@@ -342,7 +343,8 @@ def lookup_numeric_trait(
     if spec.code == "yield_kg_per_mu":
         observations = _rows(session, """
             SELECT yield_kg_per_mu, trial_year, covered_years, trial_type,
-                   trial_region, source_sentence, review_status, warnings
+                   trial_region, source_sentence, review_status, warnings,
+                   control_name, relative_change_pct, is_aggregate
             FROM ricedata.rice_variety_yield_observation
             WHERE approval_id = :approval_id AND yield_kg_per_mu IS NOT NULL
             ORDER BY evidence_order, yield_observation_id LIMIT 30
@@ -350,28 +352,26 @@ def lookup_numeric_trait(
         label = _approval_label(approval)
         source_url = variety.get("source_url")
         if not observations:
-            return _outcome(f"**{variety['variety_name']} · {label}**：本地这条审定记录未收录可核对的亩产值。",
+            return _outcome(f"**{variety['variety_name']} · {label}**：系统数据库的这条审定记录未收录可核对的亩产值。",
                             context=resolved_context)
         lines = []
         evidence = []
-        trial_labels = {"regional_trial": "区域试验", "production_trial": "生产试验",
-                        "variety_comparison": "品种比较试验"}
+        entries = []
         for item in observations:
-            year = f"{item['trial_year']}年" if item.get("trial_year") else (
-                "覆盖" + "/".join(map(str, item.get("covered_years") or [])) + "年（具体对应年份待核）"
-                if item.get("covered_years") else "年份未明确"
-            )
-            trial = trial_labels.get(item.get("trial_type"), item.get("trial_type") or "试验类型未明确")
-            warning = "；原抽取标记待核" if item.get("review_status") == "review" else ""
+            year = yield_year(item)
+            trial = trial_label(item.get("trial_type"))
+            warning = "待人工核对" if item.get("review_status") == "review" else "—"
             value = _number(item["yield_kg_per_mu"])
-            excerpt = str(item.get("source_sentence") or "").strip()
-            lines.append(f"- **{value}公斤/亩**；{year}；{trial}{warning}。原文：{excerpt}")
-            evidence.append({"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · 亩产",
-                             "detail": f"{value}公斤/亩；{year}；{trial}；{excerpt[:250]}", "priority": 1,
-                             **({"url": source_url} if source_url else {})})
+            entries.append([year, trial, f"{value}公斤/亩", item.get("control_name") or "未注明",
+                            yield_change(item), warning])
+        lines.append(table(["试验年份", "试验类型", "亩产", "对照品种", "较对照变化", "备注"], entries))
+        evidence.append({"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · 亩产",
+                         "detail": "按试验记录分别展示，未取平均。",
+                         "excerpts": source_excerpts([("产量取值依据", item.get("source_sentence")) for item in observations]),
+                         "priority": 1, **({"url": source_url} if source_url else {})})
         note = "\n\n该审定记录包含多个产量值；请结合试验年份和试验类型辨认，待核项不可当作最终精确结论。" if len(observations) > 1 else ""
-        link = f"\n\n[国家水稻数据中心原始品种页面]({source_url})" if source_url else ""
-        return _outcome(f"**{variety['variety_name']} · {label}的亩产记录**：\n\n" + "\n".join(lines) + note + link,
+        return _outcome(f"**{variety['variety_name']} · {label}的亩产记录**：\n\n" + "\n".join(lines) + note +
+                        "\n\n可展开下方“查看原文与来源”核对依据。",
                         evidence=evidence, context=resolved_context)
     measurements = _rows(session, """
         SELECT m.value_numeric, m.value_min, m.value_max, m.value_text, m.unit,
@@ -439,7 +439,7 @@ def lookup_numeric_trait(
                       "不能把其中疑似数字直接当作已确认结果：\n\n" +
                       "\n".join(f"- {item}" for item in possible_raw[:3]))
         elif not facts:
-            detail = "本地该条审定记录的已结构化数据及已保存原文中均未检索到该指标数值。"
+            detail = "系统数据库中，该条审定记录的已整理数据及已保存原文均未检索到该指标数值。"
         if not facts:
             return _outcome(
             f"**{variety['variety_name']} · {label}**：未找到“{spec.name}”的已结构化可核对数值。"
@@ -452,31 +452,22 @@ def lookup_numeric_trait(
             )
     lines: list[str] = []
     evidence: list[dict] = []
+    original_sections = []
     for fact in facts:
-        raw_value = (f"{_number(fact['value_min'])}～{_number(fact['value_max'])}"
-                     if fact.get("value_min") is not None and fact.get("value_max") is not None
-                     else _number(fact.get("value_numeric")) or str(fact.get("value_text") or "").strip())
-        qualifier = str(fact.get("qualifier") or "")
-        if not qualifier and ("左右" in str(fact.get("value_text") or "") or "约" in str(fact.get("value_text") or "")):
-            qualifier = "约"
         when = f"（{fact['observation_year']}年检测）" if fact.get("observation_year") else ""
-        unit = fact.get("unit") or spec.unit
-        value = f"{raw_value}{unit}{qualifier}" if qualifier in {"以上", "以下"} else f"{qualifier}{raw_value}{unit}"
-        literal = str(fact.get("value_text") or "")
-        bound = re.search(r"以上|以下", literal)
-        if bound:
-            prefix = "约" if re.search(r"约|近|左右", literal) else ""
-            value = f"{prefix}{raw_value}{unit}{bound.group(0)}"
+        value = display_value({**fact, "trait_code": spec.code, "unit": fact.get("unit") or spec.unit})
         source_field = {"yield_performance_text": "产量表现", "cultivation_text": "栽培技术要点",
                         "suitable_area_text": "适宜地区", "approval_opinion_text": "审定意见",
                         "variety_source_text": "品种来源"}.get(fact.get("source_field"), "特征特性")
         excerpt = str(fact.get("source_text") or "").strip()
-        raw_note = "（按原文明示数值读取，尚未入结构化表）" if fact.get("from_raw") else ""
-        lines.append(f"- **{value}**{when}，来源：{source_field}{raw_note}。原文：{excerpt}")
-        evidence.append({"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · {spec.name}",
-                         "detail": f"{value}；{source_field}；{excerpt[:250]}", "priority": 1,
-                         **({"url": source_url} if source_url else {})})
+        raw_note = "（按原文读取，待核对）" if fact.get("from_raw") else ""
+        lines.append(f"- **{value}**{when}，依据：{source_field}{raw_note}。")
+        original_sections.append((source_field + "原文", excerpt))
+    evidence.append({"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · {spec.name}",
+                     "detail": "以下原文对应本条审定记录，可用于核对数值及其限定条件。",
+                     "excerpts": source_excerpts(original_sections), "priority": 1,
+                     **({"url": source_url} if source_url else {})})
     note = "\n\n同一审定记录出现多个检测值，已逐条列出，未擅自取平均。" if len(facts) > 1 else ""
-    link = f"\n\n[国家水稻数据中心原始品种页面]({source_url})" if source_url else ""
-    return _outcome(f"**{variety['variety_name']} · {label}的{spec.name}**：\n\n" + "\n".join(lines) + note + link,
+    return _outcome(f"**{variety['variety_name']} · {label}的{spec.name}**：\n\n" + "\n".join(lines) + note +
+                    "\n\n可展开下方“查看原文与来源”核对依据。",
                     evidence=evidence, context=resolved_context)

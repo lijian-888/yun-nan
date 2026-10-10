@@ -173,7 +173,9 @@ class ApprovalLookupIntegrationTests(unittest.TestCase):
             self.assertEqual(result["context"]["variety_id"], 42583)
             self.assertIn("赣审稻2004027", result["content"])
             self.assertIn("浙审稻2004011", result["content"])
-            self.assertIn("产量表现原文", result["content"])
+            self.assertNotIn("产量表现原文", result["content"])
+            self.assertTrue(any(excerpt["title"] == "产量表现原文" for card in result["evidence"]
+                                for excerpt in card.get("excerpts", [])))
             self.assertNotIn("国稻3号的已知平均株高", result["content"])
 
     def test_all_phenotype_followup_uses_last_resolved_variety(self):
