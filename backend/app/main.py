@@ -156,8 +156,8 @@ from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_rea
 from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_question
 from .research_clarification import clarification_for_question, expanded_question
 from .ricedata_variety_overview import lookup_variety_overview
-from .local_variety_query import contains_institute_history, lookup_local_variety_data, lookup_private_variety_data, source_scope
-from .dialogue_orchestration import DialoguePlan, plan_dialogue, validate_fact_measurements
+from .local_variety_query import contains_institute_history, contains_named_private_material, lookup_local_variety_data, lookup_private_variety_data, source_scope
+from .dialogue_orchestration import DialoguePlan, plan_dialogue, validate_fact_measurements, dialogue_response_guidance
 from .research_question_routing import is_general_explanation, is_system_capability_question, build_system_capability_evidence
 from .ricedata_variety_identity import has_explicit_subject
 from .ricedata_trait_facts import requested_traits
@@ -6776,6 +6776,13 @@ async def research_chat_stream(
     session.execute(
         select(ResearchSession.id).where(ResearchSession.id == research_session_id).with_for_update()
     ).scalar_one()
+    active_turn = session.scalar(select(AIGatewayTask.id).where(
+        AIGatewayTask.session_id == research_session_id,
+        AIGatewayTask.owner_id == user.id,
+        AIGatewayTask.status.in_(["queued", "running"]),
+    ).limit(1))
+    if active_turn:
+        raise HTTPException(409, "当前会话上一轮仍在处理中，请等待完成或取消后再发送，避免上下文错序。")
     display_content = payload.content.strip()
     clarification_resolution_state = ([{
         "state": "research_clarification_resolved",
@@ -7035,7 +7042,12 @@ async def research_chat_stream(
     # Naming a public institution/data source is not disclosure of its private
     # records. Actual private history, knowledge and attachments remain blocked;
     # database-tool results are checked again before any model synthesis.
-    private_evidence_selected = (contains_institute_history(trait_history or history_items)
+    try:
+        named_private = contains_named_private_material(session, payload.content,
+            institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED) if selected_provider.external else False
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    private_evidence_selected = (named_private or contains_institute_history(trait_history or history_items)
                                 or bool(attachment_cards or vision_blocks)) or any(
         card.get("type") == "private_knowledge" for card in knowledge_cards
     )
@@ -7316,6 +7328,7 @@ async def research_chat_stream(
                     # about this image.  Pure text follow-ups retain the history.
                     conversation_history=[] if has_current_vision_images else safe_conversation_history,
                     has_current_vision_images=has_current_vision_images,
+                    response_guidance=dialogue_response_guidance(dialogue_plan),
                 ),
             ):
                 if result["type"] == "gateway_retry":

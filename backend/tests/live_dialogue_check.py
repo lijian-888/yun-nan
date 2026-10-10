@@ -7,7 +7,7 @@ import argparse
 import asyncio
 
 from app.ai_gateway import provider_settings
-from app.dialogue_orchestration import plan_dialogue, validate_fact_measurements
+from app.dialogue_orchestration import plan_dialogue, validate_fact_measurements, dialogue_response_guidance
 from app.main import SessionLocal, build_dialogue_evidence
 from app.research_agent import stream_research_reply
 
@@ -51,7 +51,8 @@ async def main():
         with SessionLocal() as session:
             context, cards, states = await build_dialogue_evidence(session, plan, question, [],
                 actor="只读模型验证", project_id="", external=provider.external)
-        async for event in stream_research_reply(user_prompt=question, evidence_context=context, memory_state=None):
+        async for event in stream_research_reply(user_prompt=question, evidence_context=context, memory_state=None,
+                                                 response_guidance=dialogue_response_guidance(plan)):
             if event.get("type") != "complete":
                 continue
             answer = event["content"]
@@ -59,13 +60,15 @@ async def main():
                 validate_fact_measurements(answer, context)
             if plan.intent == "capabilities":
                 assert "未找到可确认的品种" not in answer and "record_count" not in answer
-                assert len(answer) < 600, "An availability question should not receive a long catalog"
+                assert len(answer) < 400, "An availability question should not receive a long catalog"
+            if plan.intent == "general":
+                assert "GB/T" not in answer and len(answer) < 500, answer
             if "2006年福建" in question:
                 assert "24.1" in answer and "福建" in answer, answer
             if question == "D优130的直链淀粉含量是多少":
                 assert any(s.get("state") == "research_clarification" for s in states)
                 assert "24.1%" not in answer, answer
-            print("ANSWER", question, answer, flush=True)
+            print("ANSWER", question, event.get("response_mode", "model"), answer, flush=True)
     print("LIVE_CHECK_OK", flush=True)
 
 

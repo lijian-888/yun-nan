@@ -66,6 +66,22 @@ def validate_fact_measurements(answer: str, evidence: str) -> None:
         raise ResearchAgentError("模型回答出现无查询证据支持的指标数值，本轮未展示或保存回答，请重试。")
 
 
+def dialogue_response_guidance(plan: DialoguePlan) -> str:
+    """Presentation requirements, not answer content or model thought text."""
+    base = ("请自然地与科研人员交谈，先直接回答本轮问题。不要照抄内部JSON、字段名或整段证据，"
+            "不要重复原文、无关免责声明、泛泛的使用说明或编造品种示例。"
+            "只有本轮来源证据明确支持时才引用具体标准号、文献、法规或院方政策；一般知识不冒充已查证事实。")
+    if plan.intent == "capabilities":
+        if plan.source != "unspecified" and not plan.include_counts:
+            return base + "本轮只是在确认某个数据来源。默认用1至3句话说明是否可访问、可查的大致内容及必要的权限边界；不要输出完整目录、多个标题或额外提问清单。"
+        return base + "根据用户真正问的能力、数据范围或数量选择重点，通常一个短段落或3至5个简短要点足够，不要同时输出全部功能与全部数据目录。"
+    if plan.intent == "general":
+        return base + "默认简洁作答；术语解释先说定义和用途，通常一个短段落足够。只有用户要求详细、步骤或对比时再展开；不要自行扩展成带标准号和分类数值的长篇报告。"
+    if plan.intent == "variety_fact":
+        return base + "明确指标先给对应值与审定范围；需要选择时只问这一必要问题。不要自行选择年份、省份，不补全缺失值，不更换单位，不输出与所问指标无关的性状。"
+    return base + "复杂研究任务可按需分点，先说明能依据哪些实际证据做什么；只有必要条件缺失时追问最关键的条件。"
+
+
 async def plan_dialogue(*, provider: AIProviderSettings, question: str,
                        history: list[dict[str, str]]) -> DialoguePlan:
     """Fail closed on malformed planner output; no keyword-routing fallback."""

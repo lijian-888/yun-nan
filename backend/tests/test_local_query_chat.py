@@ -215,6 +215,25 @@ class LocalQueryChatTests(unittest.TestCase):
         self.assertFalse(any("message" in p or "text" in p for p in payloads))
         self.assertTrue(any("无查询证据" in p.get("detail", "") for p in payloads))
 
+    def test_second_tab_cannot_insert_turn_while_same_conversation_is_running(self):
+        from fastapi import HTTPException
+        self.session.add(self.main.AIGatewayTask(institution_id=self.main.INSTITUTION_ID,
+            owner_id=self.user.id, project_id=self.session.get(self.main.ResearchSession, self.conversation_id).project_id,
+            session_id=self.conversation_id, idempotency_key=str(uuid.uuid4()), request_hash="test-only",
+            provider="cherryin", model="test-model", status="running"))
+        self.session.commit()
+        with self.assertRaises(HTTPException) as caught:
+            self.ask("D优130的直链淀粉含量")
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("上下文错序", str(caught.exception.detail))
+
+    def test_general_question_naming_private_material_is_not_sent_to_external_model(self):
+        from fastapi import HTTPException
+        with self.assertRaises(HTTPException) as caught:
+            self.model_capability_turn(question="CXCDD1447的千粒重应该如何理解", intent="general")
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("不能发送", str(caught.exception.detail))
+
 
 if __name__ == "__main__":
     unittest.main()

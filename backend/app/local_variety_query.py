@@ -249,6 +249,23 @@ def lookup_local_variety_data(session: Session, question: str, history: list[Any
             "pending": next((r["pending"] for _, r in results if r.get("pending")), None)}
 
 
+def contains_named_private_material(session: Session, question: str, *, institute_enabled: bool) -> bool:
+    """Recognize private identifiers without exporting their records to models."""
+    if not institute_enabled:
+        return False
+    if _MATERIAL_ID.search(question):
+        return True
+    if source_scope(question, "both") == "public":
+        return False
+    try:
+        with session.begin_nested():
+            return bool(_materials(session, question))
+    except SQLAlchemyError:
+        # Do not silently relax an enabled institute boundary when its
+        # identity guard cannot query the authorized material view.
+        raise RuntimeError("院内材料身份安全检查暂不可用，请稍后重试。")
+
+
 def lookup_private_variety_data(session: Session, question: str, history: list[Any],
                                 *, institute_enabled: bool, variety_id: int | None = None) -> dict | None:
     """Keep confirmed private material facts inside the local deployment boundary.
