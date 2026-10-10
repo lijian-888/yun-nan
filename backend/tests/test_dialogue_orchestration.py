@@ -66,6 +66,16 @@ class DialoguePlannerTests(unittest.TestCase):
         self.assertNotIn("core.genotype_sample", polished)
         self.assertEqual(polish_business_answer(answer, "请显示原始状态码"), answer)
 
+    def test_business_answer_removes_incidental_raw_relation_and_followup(self):
+        answer = ("当前 `core.genotype_sample` 表中有已关联180个样本；unmatched未返回。"
+                  "\n\n如果你需要按项目进一步统计，请告诉我。")
+        polished = polish_business_answer(answer, "查询基因型样本表中的样本数")
+        self.assertIn("当前所查业务表中", polished)
+        self.assertIn("已关联180", polished)
+        self.assertIn("未匹配未返回", polished)
+        self.assertNotIn("core.genotype_sample", polished)
+        self.assertNotIn("项目", polished)
+
 
 if __name__ == "__main__":
     unittest.main()

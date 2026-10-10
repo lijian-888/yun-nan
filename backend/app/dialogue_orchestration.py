@@ -84,6 +84,7 @@ def polish_business_answer(answer: str, question: str) -> str:
                     lambda m: m.group(2) if re.search(r"[\u4e00-\u9fff]", m.group(2)) else m.group(0),
                     answer)
     for code, label in {"linked": "已关联", "unlinked": "未关联",
+                        "matched": "已匹配", "unmatched": "未匹配", "pending": "待确认",
                         "not_eligible_missing_dimensions": "缺少评分维度，暂未形成综合分"}.items():
         if code not in question:
             answer = re.sub(rf"(?<![A-Za-z0-9_]){code}(?![A-Za-z0-9_])", label, answer)
@@ -92,7 +93,10 @@ def polish_business_answer(answer: str, question: str) -> str:
                     lambda m: m.group(0) if m.group(1) in question else "", answer)
     answer = re.sub(rf"(?<![A-Za-z0-9_.])({relation})(?![A-Za-z0-9_])",
                     lambda m: m.group(0) if m.group(1) in question else "相关业务数据", answer)
+    answer = re.sub(r"\s*`相关业务数据`\s*表", "所查业务表", answer)
+    answer = answer.replace("`相关业务数据`", "所查业务数据")
     answer = re.sub(r"`(已关联|未关联|缺少评分维度，暂未形成综合分)`", r"\1", answer)
+    answer = re.sub(r"\n\n如果你需要[^\n]*\Z", "", answer)
     return answer
 
 
