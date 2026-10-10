@@ -14,6 +14,7 @@ from .ricedata_trait_facts import TRAIT_BY_CODE, requested_traits
 from .ricedata_trait_lookup import _approval_followup, _history_context, lookup_numeric_trait
 from .ricedata_variety_identity import has_explicit_subject, resolve_varieties, select_name_matches
 from .ricedata_variety_overview import lookup_variety_overview, wants_variety_overview
+from .research_question_routing import is_general_explanation, is_system_capability_question
 
 
 # Matching names is NOT a cross-source identity merge. Each ID remains scoped.
@@ -144,6 +145,10 @@ def lookup_local_variety_data(session: Session, question: str, history: list[Any
     Only the already authenticated institute chat route calls this function.
     """
     history = history or []
+    # Keyword presence is not query intent. Keep help and scientific reasoning
+    # out of the literal measurement path, even after a prior cultivar turn.
+    if is_system_capability_question(question) or is_general_explanation(question):
+        return None
     if not (_QUERY.search(question) or requested_traits(question) or _approval_followup(question)):
         return None
     if re.search(r"推荐|综合评价|排名|预测|筛选|哪些品种|所有品种|天气", question):
@@ -216,6 +221,10 @@ def lookup_local_variety_data(session: Session, question: str, history: list[Any
     if institute_result:
         results.append(("云南农科院院内治理库", institute_result))
     if not results:
+        if not traits and not _approval_followup(question) and not wants_variety_overview(question) and not re.search(
+            r"的(?:全部|所有)?(?:数据|资料|信息|表型)|(?:查询|查看|查一下).*(?:品种|材料)", question
+        ):
+            return None
         if not explicit and not traits and not source_errors:
             return None
         return {"content": "\n\n".join(source_errors) if source_errors else

@@ -157,6 +157,7 @@ from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_qu
 from .research_clarification import clarification_for_question, expanded_question
 from .ricedata_variety_overview import lookup_variety_overview
 from .local_variety_query import contains_institute_history, lookup_local_variety_data, source_scope
+from .research_question_routing import is_general_explanation, system_capability_answer
 from .ricedata_variety_identity import has_explicit_subject
 from .ricedata_trait_facts import requested_traits
 from .breeding_dossier import (
@@ -6015,6 +6016,8 @@ async def build_published_evidence_context(
     project_id: str = DEFAULT_PROJECT_ID,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Use controlled templates instead of sending a bulk database snapshot to the model."""
+    if is_general_explanation(question):
+        return "本轮为知识解释或方法讨论，不执行无对象的品种数值查询。可用一般知识回答，但不得冒充数据库实测结果。", []
     trial_context, trial_cards = build_published_trial_evidence(session, question, requested_by, project_id)
     if trial_context:
         return trial_context, trial_cards
@@ -6778,13 +6781,17 @@ async def research_chat_stream(
                 local_question = display_content + " " + "、".join(
                     spec.name for spec in requested_traits(original_question)
                     if spec.name not in display_content)
-        trait_result = lookup_local_variety_data(
+        trait_result = system_capability_answer(
+            session, local_question, institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
+        ) or lookup_local_variety_data(
             session, local_question, trait_history,
             institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED,
             variety_id=(marker.get("variety_id") if payload.clarification_action
                         and isinstance(marker.get("variety_id"), int) else None),
         )
-        is_variety_overview = trait_result is not None
+        is_capability_answer = bool(trait_result and trait_result.get("response_kind") == "system_capabilities")
+        local_model = ("system_capabilities" if is_capability_answer else
+                       "ricedata_trait_lookup" if requested_traits(local_question) else "ricedata_variety_overview")
         if trait_result is not None:
             automatic_title = auto_title_for_first_message(
                 research_session.title, payload.content, has_messages=bool(trait_history),
@@ -6805,7 +6812,7 @@ async def research_chat_stream(
                     role="user",
                     content=display_content,
                     evidence=[],
-                    operation_state=[{"state": "accepted", "label": "已接收表型总览查询" if is_variety_overview else "已接收指标查询"},
+                    operation_state=[{"state": "accepted", "label": "已接收系统能力问题" if is_capability_answer else "已接收数据库查询"},
                                      *clarification_resolution_state],
                 )
                 session.add(user_message)
@@ -6818,10 +6825,10 @@ async def research_chat_stream(
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
                 provider="local_database",
-                model="ricedata_variety_overview" if is_variety_overview else "ricedata_trait_lookup",
+                model=local_model,
             )
             task.provider = "local_database"
-            task.model = "ricedata_variety_overview" if is_variety_overview else "ricedata_trait_lookup"
+            task.model = local_model
             task.status = "completed"
             task.egress_classification = "local_only"
             task.redaction_count = 0
@@ -6832,7 +6839,7 @@ async def research_chat_stream(
             task.error_message = None
             session.add(task)
             session.flush()
-            operation_state = [{"state": "completed", "label": "已按品种、审定记录和原始文本完成数据库查询"}]
+            operation_state = [{"state": "completed", "label": "已核对当前数据目录和查询能力" if is_capability_answer else "已按品种、审定记录和原始文本完成数据库查询"}]
             if trait_result.get("context"):
                 operation_state.append(trait_result["context"])
             if trait_result.get("contains_private"):
@@ -6866,7 +6873,7 @@ async def research_chat_stream(
                 owner_id=user.id,
                 project_id=research_session.project_id,
                 session_id=research_session_id,
-                action="ricedata_variety_overview_completed" if is_variety_overview else "ricedata_trait_lookup_completed",
+                action=local_model + "_completed",
                 audit_metadata={
                     "task_id": task.id,
                     "clarification_requested": bool(trait_result.get("pending")),
@@ -6880,8 +6887,8 @@ async def research_chat_stream(
             async def stream_trait_result() -> Any:
                 if automatic_title:
                     yield sse_event("session_title", {"session_id": research_session_id, "title": automatic_title})
-                yield sse_event("status", {"label": "已核对本地品种与审定表型" if is_variety_overview
-                                           else "已核对本地品种及审定指标", "task_id": task.id})
+                yield sse_event("status", {"label": "已核对系统查询能力" if is_capability_answer
+                                           else "已核对系统数据库中的品种及审定资料", "task_id": task.id})
                 yield sse_event("complete", {"message": response_message, "task_id": task.id})
 
             return StreamingResponse(

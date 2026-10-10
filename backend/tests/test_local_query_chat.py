@@ -104,6 +104,23 @@ class LocalQueryChatTests(unittest.TestCase):
         stored = self.session.get(self.main.ResearchMessage, result["id"])
         self.assertEqual(stored.evidence, result["evidence"])
 
+    def test_capability_question_after_variety_query_uses_live_catalog(self):
+        self.ask("D优130的直链淀粉含量是多少？")
+        result = self.ask("现在有哪些数据可以查询")
+        self.assertIn("当前可以查询和讨论", result["content"])
+        self.assertNotIn("未找到可确认的品种", result["content"])
+        self.assertNotIn("research_clarification", str(result["operation_state"]))
+        self.assertEqual(result["evidence"][0]["type"], "system_capabilities")
+        task = self.session.scalar(select(self.main.AIGatewayTask).where(
+            self.main.AIGatewayTask.result_message_id == result["id"]))
+        self.assertEqual(task.model, "system_capabilities")
+
+    def test_general_question_enters_model_gateway_not_variety_lookup(self):
+        self.ask("D优130的直链淀粉含量是多少？")
+        for question in ("什么是直链淀粉含量？", "如何评价稳产性？", "你好", "帮我写一段项目介绍"):
+            with self.assertRaisesRegex(AssertionError, "Local query called LLM"):
+                self.ask(question)
+
 
 if __name__ == "__main__":
     unittest.main()

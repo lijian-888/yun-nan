@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .ricedata_trait_facts import requested_traits
 from .ricedata_trait_lookup import variety_context_from_question
+from .research_question_routing import is_general_explanation, is_system_capability_question
 
 
 _PARENT_REQUEST = re.compile(r"(?:推荐|选择|筛选|选)(?:[^。！？?]{0,12})(?:亲本|杂交组合)|(?:亲本|杂交组合)(?:[^。！？?]{0,12})(?:推荐|选择|筛选)")
@@ -40,6 +41,9 @@ def clarification_for_question(
     if attempt >= 2:
         return None
     original = original_question.strip()
+    direct_parent_task = bool(_PARENT_REQUEST.search(original) and not re.search(r"如何|怎么|怎样|为什么|什么是", original))
+    if is_system_capability_question(original) or (is_general_explanation(original) and not direct_parent_task):
+        return None
     extra = supplement.strip()
     combined = f"{original} {extra}"
     if _PARENT_REQUEST.search(original) and not re.search(r"不需要推荐|不要推荐|无需推荐", original):
