@@ -55,14 +55,15 @@ class DialoguePlannerTests(unittest.TestCase):
                 validate_fact_measurements(answer, evidence)
 
     def test_business_answer_keeps_facts_but_not_internal_status_codes(self):
-        answer = ("**linked（已关联）**：180个样本；综合分标记为"
-                  "**not_eligible_missing_dimensions**（不满足综合评定条件），丰产69.43分。")
+        answer = ("基因型样本表（core.genotype_sample）中 **linked（已关联）**：180个样本；"
+                  "综合分标记为 **not_eligible_missing_dimensions**（不满足综合评定条件），丰产69.43分。")
         polished = polish_business_answer(answer, "按匹配状态统计并说明五性评价")
         self.assertIn("已关联", polished)
         self.assertIn("180", polished)
         self.assertIn("69.43", polished)
         self.assertNotIn("linked", polished)
         self.assertNotIn("not_eligible", polished)
+        self.assertNotIn("core.genotype_sample", polished)
         self.assertEqual(polish_business_answer(answer, "请显示原始状态码"), answer)
 
 

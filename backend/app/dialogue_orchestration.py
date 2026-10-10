@@ -87,6 +87,12 @@ def polish_business_answer(answer: str, question: str) -> str:
                         "not_eligible_missing_dimensions": "缺少评分维度，暂未形成综合分"}.items():
         if code not in question:
             answer = re.sub(rf"(?<![A-Za-z0-9_]){code}(?![A-Za-z0-9_])", label, answer)
+    relation = r"(?:ai|core|raw|ricedata|ncbi|public|governance|ingest|agent_query)\.[a-z_][a-z0-9_]*"
+    answer = re.sub(rf"[（(]({relation})[）)]",
+                    lambda m: m.group(0) if m.group(1) in question else "", answer)
+    answer = re.sub(rf"(?<![A-Za-z0-9_.])({relation})(?![A-Za-z0-9_])",
+                    lambda m: m.group(0) if m.group(1) in question else "相关业务数据", answer)
+    answer = re.sub(r"`(已关联|未关联|缺少评分维度，暂未形成综合分)`", r"\1", answer)
     return answer
 
 
