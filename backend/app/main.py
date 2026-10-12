@@ -7353,7 +7353,7 @@ async def research_chat_stream(
                 yield sse_event("status", {"label": f"正在准备 {len(vision_attachments)} 张本地图片供当前模型进行视觉分析"})
             public_request = resolve_public_request(safe_user_prompt, safe_conversation_history)
             page_read = bool(requested_public_pages(public_request))
-            yield sse_event("status", {"label": "正在通过 Tavily 读取指定网页正文" if page_read else "正在判断是否需要检索近期可信公开资料"})
+            yield sse_event("status", {"label": "正在通过 Tavily 读取指定网页正文" if page_read else "正在判断是否需要检索公开资料"})
             web_results, search_note = (await search_public_references(
                 public_request, model_requested=dialogue_plan.needs_web,
             ) if dialogue_plan.needs_web or needs_current_public_search(public_request) or page_read else ([], None))
@@ -7366,16 +7366,17 @@ async def research_chat_stream(
             if web_results:
                 evidence.extend({
                     "priority": 4,
-                    "type": "trusted_public_web",
+                    "type": "public_web_candidate" if item.source_kind == "public_search_candidate" else "trusted_public_web",
                     "title": f"公开参考：{item.title}",
-                    "detail": f"Tavily {item.retrieval_method}；仅限公开摘要/页面摘录，不代表付费全文，未写入平台知识库。",
+                    "detail": ("Tavily 检索候选来源，未经独立来源质量核验；" if item.source_kind == "public_search_candidate" else "Tavily 公开来源；")
+                              + f"{item.retrieval_method}；仅限公开摘要/页面摘录，不代表付费全文，未写入平台知识库。",
                     "url": item.url,
                     "requested_url": item.requested_url,
                     "content_characters": item.content_characters,
                     "content_truncated": item.content_truncated,
                     "unreadable_images": item.unreadable_images,
                 } for item in web_results)
-                yield sse_event("status", {"label": f"已读取 {len(web_results)} 个指定页面，正在依据正文总结" if page_read else f"已检索到 {len(web_results)} 条可信公开参考来源"})
+                yield sse_event("status", {"label": f"已读取 {len(web_results)} 个指定页面，正在依据正文总结" if page_read else f"已检索到 {len(web_results)} 条公开参考来源"})
             if search_note:
                 yield sse_event("status", {"label": search_note})
 

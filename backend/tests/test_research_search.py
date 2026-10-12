@@ -23,6 +23,12 @@ class QueryTests(unittest.TestCase):
         question = "使用Tavily，访问知网：https://www.cnki.net/ 帮我搜索：" + PAPER
         self.assertEqual(search.build_safe_public_query(question), (PAPER, ["cnki.net"]))
 
+    def test_broad_literature_query_excludes_answer_format_instructions(self):
+        question = "检索近五年水稻耐盐育种的公开文献，并附来源链接"
+        self.assertEqual(search.build_safe_public_query(question)[0], "近五年水稻耐盐育种的公开文献")
+        self.assertTrue(search._topic_literature_request(question))
+        self.assertFalse(search._topic_literature_request("检索论文《水稻耐盐育种研究》"))
+
     def test_local_only(self):
         for question in ["不要联网，搜索水稻文献", "仅从本地知识库检索水稻", "查询知识库中的水稻论文"]:
             self.assertFalse(search.needs_current_public_search(question), question)
@@ -137,6 +143,24 @@ class TavilyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results, [])
         self.assertEqual(len(calls), 1)
         self.assertIn("不能据此断言", note)
+
+    async def test_broad_chinese_literature_keeps_relevant_scholarly_candidates(self):
+        question = "检索近五年水稻耐盐育种的公开文献，并附来源链接"
+        article = "https://gdnykx.gdaas.cn/cn/article/id/202312003"
+        pdf = "https://www.sciopen.com/local/article_pdf/10.3864/example.pdf"
+        def handler(request):
+            if request.url.path == "/extract":
+                return httpx.Response(200, json={"results": [{"url": article, "raw_content": "水稻耐盐分子机制研究进展，公开正文。"}]})
+            return httpx.Response(200, json={"results": [
+                {"title": "水稻耐盐分子机制研究进展", "url": article, "content": "水稻耐盐机制与育种综述"},
+                {"title": "高产耐盐水稻选育", "url": pdf, "content": "水稻耐盐品种选育研究"},
+                {"title": "一种耐盐水稻的专利", "url": "https://patents.google.com/patent/CN123", "content": "专利"},
+            ]})
+        (results, _), calls = await self.execute(question, handler)
+        self.assertEqual(calls[0][1]["query"], "近五年水稻耐盐育种的公开文献")
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0].source_kind, "public_search_candidate")
+        self.assertEqual(results[0].retrieval_method, "search+extract")
 
     async def test_direct_detail_extract_when_search_empty(self):
         url = "https://www.ricedata.cn/variety/35"
