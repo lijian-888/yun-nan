@@ -66,7 +66,9 @@ BEGIN
         INSERT INTO agent_query.dataset_registry VALUES (
             r.nspname||'.'||r.relname,view_name,r.nspname,r.relname,r.relkind,access_level,COALESCE(r.description,''),hidden)
         ON CONFLICT(dataset_id) DO UPDATE SET access_class=EXCLUDED.access_class,
-            description=EXCLUDED.description,excluded_columns=EXCLUDED.excluded_columns;
+            description=CASE WHEN EXCLUDED.description='' THEN agent_query.dataset_registry.description
+                             ELSE EXCLUDED.description END,
+            excluded_columns=EXCLUDED.excluded_columns;
     END LOOP;
     GRANT USAGE ON SCHEMA agent_query TO ynaas_longyun_api;
     GRANT SELECT ON agent_query.dataset_registry TO ynaas_longyun_api;

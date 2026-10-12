@@ -81,6 +81,15 @@ class QueryCompilerTests(unittest.TestCase):
                         'trait':{'value':24.1},'email':'owner@example.com'}})
         self.assertEqual(clean['metadata'],{'trait':{'value':24.1}})
 
+    def test_completeness_catalog_keeps_business_name_but_reads_cached_projection(self):
+        cached=dataset('ai.completeness_summary',['data_dimension','material_coverage_rate',
+            'snapshot_refreshed_at'])
+        cached['query_view']='ai_completeness_cached'
+        sql,_=compile_business_query(DataQuery(relation='ai.completeness_summary',
+            columns=['data_dimension','material_coverage_rate']),[cached])
+        self.assertIn('agent_query."ai_completeness_cached"',sql)
+        self.assertNotIn('ai__completeness_summary',sql)
+
     def test_shared_flag_does_not_allow_private_attachments_or_credentials(self):
         from app.ai_gateway import prepare_egress, AIEgressBlockedError
         provider=AIProviderSettings('cherryin','https://example.invalid/v1','test','',True)
@@ -192,6 +201,23 @@ class RealBusinessQueryTests(unittest.TestCase):
             'filters':[{'field':'source_variety_id','op':'eq','value':'NONEXISTENT-TEST-99999'}]}))
         self.assertEqual(missing['rows'],[])
         self.assertEqual(missing['status'],'no_matching_rows')
+
+    def test_completeness_summary_uses_populated_snapshot_and_exposes_freshness(self):
+        registered=self.session.execute(text("""
+            SELECT query_view FROM agent_query.dataset_registry
+            WHERE dataset_id='ai.completeness_summary'
+        """)).scalar_one_or_none()
+        if registered!='ai_completeness_cached':
+            self.skipTest('Apply completeness snapshot migration first')
+        result=execute_business_query(self.session,DataQuery.model_validate({
+            'relation':'ai.completeness_summary',
+            'columns':['data_dimension','material_count','materials_missing','material_coverage_rate'],
+            'order_by':[{'field':'material_coverage_rate','direction':'asc'}],
+            'limit':30}))
+        self.assertGreaterEqual(result['returned_rows'],10)
+        self.assertIn('snapshot_refreshed_at',result)
+        self.assertTrue(all(int(row['material_count']) >= int(row['materials_missing'])
+                            for row in result['rows']))
 
     def test_unauthorized_admin_dataset_and_hidden_columns_fail_closed(self):
         with self.assertRaises(BusinessQueryError):

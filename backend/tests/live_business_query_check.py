@@ -23,6 +23,8 @@ async def main(only_case: int | None = None):
         ('查询基因型样本表中的样本数量，按匹配状态分组',None),
         ('只查院内CXCDD1447的千粒重', '24.69'),
         ('D优130在2006年福建审定的直链淀粉含量是多少', '24.1'),
+        ('目前院内材料的各类数据完整程度怎么样？请分别列出有数据和缺失的材料数量、覆盖率，并按覆盖率从低到高排序。',
+         'snapshot_refreshed_at'),
     ]
     for index,(question,expected) in enumerate(cases, 1):
         if only_case is not None and index != only_case:
@@ -35,6 +37,9 @@ async def main(only_case: int | None = None):
                 provider=provider,admin=False,model_history=[])
         print('EVIDENCE',[(c.get('title'),c.get('detail')) for c in cards],flush=True)
         assert cards, ('No actual source cards',question,states)
+        if index == 5:
+            assert any(c.get('source_dataset') == 'ai.completeness_summary' for c in cards), (
+                'Completeness question did not select cached aggregate', cards)
         if expected:
             assert expected in context,(question,'Expected value not in actual query evidence')
         safe=prepare_egress([context],provider=provider)
@@ -54,7 +59,7 @@ async def main(only_case: int | None = None):
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--run-live',action='store_true')
-    parser.add_argument('--case',type=int,choices=range(1,5))
+    parser.add_argument('--case',type=int,choices=range(1,6))
     args=parser.parse_args()
     if not args.run_live:
         parser.error('Use --run-live to authorize model calls')

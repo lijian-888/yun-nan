@@ -6155,6 +6155,7 @@ async def build_dialogue_evidence(
     *, actor: str, project_id: str, external: bool, variety_id: int | None = None,
     original_question: str = "", clarification_attempt: int = 0, skipped: bool = False,
     provider: Any = None, admin: bool = False, model_history: list[dict] | None = None,
+    task_id: str | None = None,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     """Only the admitted model plan selects public query tools; never raw SQL."""
     if plan.intent == "capabilities":
@@ -6216,7 +6217,8 @@ async def build_dialogue_evidence(
                     "\n请用自然语言询问最关键的缺少条件，用户可以跳过；不能在条件未明确时声称已完成推荐。", [], [state])
     if provider is not None and plan.intent in {"database", "reference", "research_task"}:
         return await build_business_evidence(session, question, provider=provider, admin=admin,
-                                             history=model_history, source_hint=plan.source)
+                                             history=model_history, source_hint=plan.source,
+                                             task_id=task_id)
     if plan.intent == "reference":
         context, cards = build_ynaas_database_evidence(session, question)
         return context, cards, []
@@ -7335,6 +7337,7 @@ async def research_chat_stream(
                     external=selected_provider.external,
                     provider=selected_provider, admin="field_admin" in user.roles,
                     model_history=safe_conversation_history,
+                    task_id=ai_task_id,
                     variety_id=(marker.get("variety_id") if payload.clarification_action
                                 and isinstance(marker.get("variety_id"), int) else None),
                     original_question=original_question if payload.clarification_action else "",
