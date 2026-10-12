@@ -235,6 +235,7 @@ AI_TASK_MAX_ATTEMPTS = min(3, max(1, int(os.getenv("AI_TASK_MAX_ATTEMPTS", "2"))
 AI_TASK_GATE = AIGatewayConcurrencyGate(AI_GATEWAY_CONCURRENCY)
 AI_TASK_CANCEL_EVENTS: dict[str, asyncio.Event] = {}
 AI_TASK_RESUME_EVENTS: dict[str, asyncio.Event] = {}
+AI_TASK_MODEL_INFLIGHT: set[str] = set()
 AI_TASK_RUNNING_COROUTINES: dict[str, asyncio.Task[Any]] = {}
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
@@ -1047,6 +1048,7 @@ async def _admit_ai_task(task_id: str) -> None:
 def _release_ai_task(task_id: str) -> None:
     AI_TASK_CANCEL_EVENTS.pop(task_id, None)
     AI_TASK_RESUME_EVENTS.pop(task_id, None)
+    AI_TASK_MODEL_INFLIGHT.discard(task_id)
     AI_TASK_RUNNING_COROUTINES.pop(task_id, None)
     AI_TASK_GATE.release(task_id)
 
@@ -1054,15 +1056,28 @@ def _release_ai_task(task_id: str) -> None:
 async def _ai_pause_events(task_id: str) -> AsyncGenerator[str, None]:
     """Hold the same SSE turn at a checkpoint; keep the connection alive."""
     announced = False
+    slot_released = False
     while True:
         _raise_if_ai_task_cancelled(task_id)
         task = _load_ai_task(task_id)
         if not task or task.status != "paused":
             if announced:
+                if slot_released and task:
+                    try:
+                        await AI_TASK_GATE.acquire(task_id, task.institution_id, AI_TASK_QUEUE_WAIT_SECONDS)
+                    except TimeoutError as exc:
+                        raise ResearchAgentError("继续任务时等待执行槽超时，本任务已停止。") from exc
+                    _raise_if_ai_task_cancelled(task_id)
+                    if (_load_ai_task(task_id) or task).status == "paused":
+                        AI_TASK_GATE.release(task_id)
+                        continue
                 yield sse_event("status", {"label": "已继续执行当前任务", "task_id": task_id, "paused": False})
             return
         if not announced:
             announced = True
+            if task_id not in AI_TASK_MODEL_INFLIGHT:
+                AI_TASK_GATE.release(task_id)
+                slot_released = True
             yield sse_event("status", {"label": "当前任务已暂停", "task_id": task_id, "paused": True})
         wake = AI_TASK_RESUME_EVENTS.setdefault(task_id, asyncio.Event())
         wake.clear()
@@ -6873,6 +6888,8 @@ async def pause_ai_task(
         return _serialize_ai_task(task)
     if task.status != "running" or task.task_type != "research_chat":
         raise HTTPException(409, "只有正在执行的对话任务可以暂停。")
+    if task_id not in AI_TASK_RUNNING_COROUTINES:
+        raise HTTPException(409, "当前任务不在此执行进程中，暂时无法暂停。")
     task.status = "paused"
     task.updated_at = datetime.now(timezone.utc)
     _record_ai_audit(session, task, "paused", "paused", {"requested_by": user.id})
@@ -7512,6 +7529,7 @@ async def research_chat_stream(
             async for pause_event in _ai_pause_events(ai_task_id):
                 yield pause_event
             yield sse_event("status", {"label": "正在调用大模型"})
+            AI_TASK_MODEL_INFLIGHT.add(ai_task_id)
             async for result in _stream_ai_with_resilience(
                 ai_task_id,
                 lambda: stream_research_reply(
@@ -7529,6 +7547,8 @@ async def research_chat_stream(
                     response_guidance=dialogue_response_guidance(dialogue_plan),
                 ),
             ):
+                if result["type"] == "complete":
+                    AI_TASK_MODEL_INFLIGHT.discard(ai_task_id)
                 async for pause_event in _ai_pause_events(ai_task_id):
                     yield pause_event
                 if result["type"] == "gateway_retry":

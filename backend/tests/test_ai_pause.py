@@ -14,11 +14,14 @@ class AIPauseTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id="user-1")
         db = MagicMock()
         db.scalar.return_value = task
+        gate = MagicMock()
+        gate.acquire = unittest.mock.AsyncMock()
         with patch.object(main, "sync_platform_account", return_value=SimpleNamespace(institution_id="institute-1")), \
              patch.object(main, "_record_ai_audit"), \
              patch.object(main, "_serialize_ai_task", side_effect=lambda row: {"id": row.id, "status": row.status}), \
              patch.object(main, "_load_ai_task", return_value=task), \
-             patch.object(main, "_raise_if_ai_task_cancelled"):
+             patch.object(main, "_raise_if_ai_task_cancelled"), \
+             patch.object(main, "AI_TASK_GATE", gate):
             main.AI_TASK_RUNNING_COROUTINES[task.id] = asyncio.current_task()
             try:
                 paused = await main.pause_ai_task(task.id, user, db)
@@ -34,6 +37,8 @@ class AIPauseTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(StopAsyncIteration):
                     await stream.__anext__()
                 self.assertEqual(db.commit.call_count, 2)
+                gate.release.assert_called_once_with(task.id)
+                gate.acquire.assert_awaited_once()
             finally:
                 main.AI_TASK_RUNNING_COROUTINES.pop(task.id, None)
                 main.AI_TASK_RESUME_EVENTS.pop(task.id, None)
@@ -55,3 +60,28 @@ class AIPauseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await stream.__anext__())["content"], "第一段回答")
             with self.assertRaises(StopAsyncIteration):
                 await stream.__anext__()
+
+    async def test_model_call_keeps_its_concurrency_slot_while_paused(self):
+        from app import main
+
+        task = SimpleNamespace(id="task-2", institution_id="institute-1", status="paused")
+        gate = MagicMock()
+        gate.acquire = unittest.mock.AsyncMock()
+        main.AI_TASK_MODEL_INFLIGHT.add(task.id)
+        with patch.object(main, "_load_ai_task", return_value=task), \
+             patch.object(main, "_raise_if_ai_task_cancelled"), \
+             patch.object(main, "AI_TASK_GATE", gate):
+            try:
+                stream = main._ai_pause_events(task.id)
+                self.assertIn("当前任务已暂停", await stream.__anext__())
+                pending = asyncio.create_task(stream.__anext__())
+                await asyncio.sleep(0.02)
+                task.status = "running"
+                main.AI_TASK_RESUME_EVENTS[task.id].set()
+                self.assertIn("已继续执行当前任务", await asyncio.wait_for(pending, 1))
+                gate.release.assert_not_called()
+                gate.acquire.assert_not_awaited()
+                await stream.aclose()
+            finally:
+                main.AI_TASK_MODEL_INFLIGHT.discard(task.id)
+                main.AI_TASK_RESUME_EVENTS.pop(task.id, None)
