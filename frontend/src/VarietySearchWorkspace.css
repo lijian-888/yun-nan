@@ -7,6 +7,8 @@
 .vs-sources small { margin-left:12px; }
 .vs-search-row { display:flex; gap:10px; }
 .vs-search-row input { flex:1; min-width:160px; }
+.variety-search-workspace select { width:auto; max-width:100%; }
+.variety-search-workspace input[type=checkbox],.variety-search-workspace input[type=radio] { width:auto; flex:none; }
 .variety-search-workspace input:not([type=checkbox]):not([type=radio]),.variety-search-workspace select { border:1px solid #b9d5c9; border-radius:5px; padding:10px; background:white; color:#17463c; }
 .vs-filters { display:flex; flex-wrap:wrap; align-items:center; gap:14px; margin:18px 0; font-size:13px; }
 .vs-filters label { display:inline-flex; align-items:center; gap:5px; }
