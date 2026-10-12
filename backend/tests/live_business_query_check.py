@@ -24,7 +24,7 @@ async def main(only_case: int | None = None):
         ('只查院内CXCDD1447的千粒重', '24.69'),
         ('D优130在2006年福建审定的直链淀粉含量是多少', '24.1'),
         ('目前院内材料的各类数据完整程度怎么样？请分别列出有数据和缺失的材料数量、覆盖率，并按覆盖率从低到高排序。',
-         'snapshot_refreshed_at'),
+         None),
     ]
     for index,(question,expected) in enumerate(cases, 1):
         if only_case is not None and index != only_case:
@@ -40,6 +40,7 @@ async def main(only_case: int | None = None):
         if index == 5:
             assert any(c.get('source_dataset') == 'ai.completeness_summary' for c in cards), (
                 'Completeness question did not select cached aggregate', cards)
+            assert 'snapshot_refreshed_at' in context, 'Snapshot freshness absent from evidence'
         if expected:
             assert expected in context,(question,'Expected value not in actual query evidence')
         safe=prepare_egress([context],provider=provider)
@@ -49,6 +50,8 @@ async def main(only_case: int | None = None):
                 continue
             answer = polish_business_answer(event['content'], question) if plan.intent == 'database' else event['content']
             print('ANSWER',answer,flush=True)
+            if index == 5:
+                assert '快照' in answer or '截至' in answer, 'Snapshot freshness absent from answer'
             if plan.intent=='variety_fact':
                 validate_fact_measurements(answer,context)
             if expected:
