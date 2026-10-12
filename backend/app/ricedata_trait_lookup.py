@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .ricedata_trait_facts import TRAIT_BY_CODE, extract_narrative_facts, requested_traits
 from .ricedata_variety_identity import has_explicit_subject, resolve_varieties
+from .ricedata_yield_candidates import extract_yield_candidates
 from .rice_query_presentation import display_value, source_excerpts, table, trial_label, yield_change, yield_year
 
 
@@ -43,6 +44,8 @@ def _number(value: Any) -> str:
 
 
 def _approval_label(approval: dict) -> str:
+    if not any(approval.get(field) for field in ("approval_no", "approval_year", "approval_region")):
+        return "品种页面资料（非审定记录）"
     parts = [str(approval["approval_year"]) + "年" if approval.get("approval_year") else "年份未载明"]
     if approval.get("approval_region"):
         parts.append(str(approval["approval_region"]))
@@ -81,8 +84,30 @@ def _outcome(
     evidence: list[dict] | None = None,
     pending: dict | None = None,
     context: dict | None = None,
+    fact_scope: dict | None = None,
 ) -> dict:
-    return {"content": content, "evidence": evidence or [], "pending": pending, "context": context}
+    return {"content": content, "evidence": evidence or [], "pending": pending,
+            "context": context, "fact_scope": fact_scope}
+
+
+def _fact_scope(variety: dict, approval: dict, trait_code: str, facts: list[dict]) -> dict:
+    """The model may paraphrase, but each measured value keeps its source record."""
+    return {"state": "numeric_fact_scope", "variety_id": variety["variety_id"],
+            "approvals": [{key: approval.get(key) for key in
+                           ("approval_id", "approval_no", "approval_year", "approval_region")}],
+            "bindings": [{"approval_id": approval["approval_id"], "trait_code": trait_code,
+                          "value": fact["value"], "status": fact.get("status", "confirmed")}
+                         for fact in facts]}
+
+
+def _merge_fact_scopes(results: list[dict]) -> dict | None:
+    scopes = [item.get("fact_scope") for item in results if item and item.get("fact_scope")]
+    if not scopes or len({scope["variety_id"] for scope in scopes}) != 1:
+        return None
+    approvals = list({row["approval_id"]: row for scope in scopes for row in scope["approvals"]}.values())
+    bindings = [binding for scope in scopes for binding in scope["bindings"]]
+    return {"state": "numeric_fact_scope", "variety_id": scopes[0]["variety_id"],
+            "approvals": approvals, "bindings": bindings}
 
 
 def _approval_followup(question: str) -> bool:
@@ -238,7 +263,7 @@ def lookup_numeric_trait(
         return _outcome("\n\n".join(item["content"] for item in results if item),
                         evidence=[card for item in results if item for card in item["evidence"]],
                         pending=next((item["pending"] for item in results if item and item.get("pending")), None),
-                        context=combined_context)
+                        context=combined_context, fact_scope=_merge_fact_scopes(results))
     spec = specs[0] if specs else TRAIT_BY_CODE.get(context["trait_code"]) if context else None
     if not spec:
         return None
@@ -253,8 +278,10 @@ def lookup_numeric_trait(
         return _outcome(f"未找到问题中的品种，无法查询“{spec.name}”。请提供完整品种名或国家水稻数据中心品种链接。",
                         context={"state": "local_query_reset", "reason": "subject_not_found"})
     if len(varieties) > 1:
-        return _outcome("检测到多个品种，请分别确认查询对象或分别提问：" +
-                        "；".join(f"{v['variety_name']}（{v['source_variety_id']}）" for v in varieties),
+        shown = varieties[:20]
+        return _outcome("检测到多个同名品种，请用来源页面或品种编号确认查询对象：" +
+                        "；".join(f"{v['variety_name']}（{v['source_variety_id']}）" for v in shown) +
+                        (f"。共{len(varieties)}条同名记录，仅列前20条；请提供原始页面链接。" if len(varieties) > 20 else ""),
                         context={"state": "local_query_reset", "reason": "multiple_subjects"})
     variety = varieties[0]
     approvals = _rows(session, """
@@ -290,7 +317,8 @@ def lookup_numeric_trait(
                         "\n\n---\n\n".join(item["content"] for item in results),
                         evidence=[card for item in results for card in item["evidence"]],
                         context={"state": "ricedata_trait_context", "variety_id": variety["variety_id"],
-                                 "trait_code": spec.code, "approval_id": None})
+                                 "trait_code": spec.code, "approval_id": None},
+                        fact_scope=_merge_fact_scopes(results))
     if context and not selected:
         ordinal = re.search(r"第\s*([一二三四五六七八九十\d]+)\s*(?:条|个)|^\s*(\d+)\s*$", selection_question)
         if ordinal:
@@ -345,15 +373,37 @@ def lookup_numeric_trait(
             SELECT yield_kg_per_mu, trial_year, covered_years, trial_type,
                    trial_region, source_sentence, review_status, warnings,
                    control_name, relative_change_pct, is_aggregate
-            FROM ricedata.rice_variety_yield_observation
+            FROM agent_query.ricedata__rice_variety_yield_observation
             WHERE approval_id = :approval_id AND yield_kg_per_mu IS NOT NULL
             ORDER BY evidence_order, yield_observation_id LIMIT 30
         """, {"approval_id": approval["approval_id"]})
         label = _approval_label(approval)
         source_url = variety.get("source_url")
         if not observations:
-            return _outcome(f"**{variety['variety_name']} · {label}**：系统数据库的这条审定记录未收录可核对的亩产值。",
-                            context=resolved_context)
+            original = _rows(session, """
+                SELECT yield_performance_text
+                FROM ricedata.rice_variety_approval WHERE approval_id = :approval_id
+            """, {"approval_id": approval["approval_id"]})
+            candidates = extract_yield_candidates(original[0].get("yield_performance_text") if original else None)
+            if candidates:
+                rows = [[item["literal"]] for item in candidates[:12]]
+                return _outcome(
+                    f"**{variety['variety_name']} · {label}**：尚无已结构化核对的亩产值；"
+                    "原文中找到以下候选值，单位按原文保留，均待核对，不作为确认结果：\n\n" +
+                    table(["原文候选值（待核对）"], rows) +
+                    ("\n\n候选超过12处，请查看原始页面继续核对。" if len(candidates) > 12 else "") +
+                    "\n\n不能合并不同试验年份或直接取平均；对应原文请展开下方来源证据核对。",
+                    evidence=[{"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · 亩产原文",
+                               "detail": "原文候选值，未经人工核对；非结构化确认值。",
+                               "excerpts": source_excerpts([("产量表现原文", original[0]["yield_performance_text"])]),
+                               "priority": 1, **({"url": source_url} if source_url else {})}],
+                    context=resolved_context,
+                    fact_scope=_fact_scope(variety, approval, spec.code, [
+                        {"value": item["literal"], "status": "unverified_original"} for item in candidates[:12]]),
+                )
+            record = "品种页面资料" if label.startswith("品种页面资料") else "这条审定记录"
+            return _outcome(f"**{variety['variety_name']} · {label}**：系统数据库的{record}未收录可核对的亩产值。",
+                            context=resolved_context, fact_scope=_fact_scope(variety, approval, spec.code, []))
         lines = []
         evidence = []
         entries = []
@@ -372,13 +422,17 @@ def lookup_numeric_trait(
         note = "\n\n该审定记录包含多个产量值；请结合试验年份和试验类型辨认，待核项不可当作最终精确结论。" if len(observations) > 1 else ""
         return _outcome(f"**{variety['variety_name']} · {label}的亩产记录**：\n\n" + "\n".join(lines) + note +
                         "\n\n可展开下方“查看原文与来源”核对依据。",
-                        evidence=evidence, context=resolved_context)
+                        evidence=evidence, context=resolved_context,
+                        fact_scope=_fact_scope(variety, approval, spec.code, [
+                            {"value": f"{_number(item['yield_kg_per_mu'])}公斤/亩",
+                             "status": "unverified_original" if item.get("review_status") == "review" else "confirmed"}
+                            for item in observations]))
     measurements = _rows(session, """
         SELECT m.value_numeric, m.value_min, m.value_max, m.value_text, m.unit,
                m.observation_year, m.observation_region, m.source_text,
                '特征特性' AS source_field
-        FROM ricedata.rice_variety_trait_measurement m
-        JOIN ricedata.rice_variety_trait_summary s ON s.trait_summary_id = m.trait_summary_id
+        FROM agent_query.ricedata__rice_variety_trait_measurement m
+        JOIN agent_query.ricedata__rice_variety_trait_summary s ON s.trait_summary_id = m.trait_summary_id
         WHERE s.approval_id = :approval_id AND m.trait_code = :trait_code
         ORDER BY m.observation_year NULLS LAST, m.trait_measurement_id LIMIT 20
     """, {"approval_id": approval["approval_id"], "trait_code": spec.code})
@@ -386,7 +440,7 @@ def lookup_numeric_trait(
         SELECT value_numeric, value_min, value_max, value_text, unit,
                NULL::smallint AS observation_year, NULL::text AS observation_region,
                source_excerpt AS source_text, source_field, qualifier
-        FROM ricedata.rice_variety_narrative_fact
+        FROM agent_query.ricedata__rice_variety_narrative_fact
         WHERE approval_id = :approval_id AND trait_code = :trait_code
           AND review_status IN ('machine_extracted', 'verified')
         ORDER BY narrative_fact_id LIMIT 20
@@ -404,7 +458,7 @@ def lookup_numeric_trait(
                    a.suitable_area_text, a.approval_opinion_text,
                    a.variety_source_text, s.characteristics_raw_text
             FROM ricedata.rice_variety_approval a
-            LEFT JOIN ricedata.rice_variety_trait_summary s ON s.approval_id = a.approval_id
+            LEFT JOIN agent_query.ricedata__rice_variety_trait_summary s ON s.approval_id = a.approval_id
             WHERE a.approval_id = :approval_id LIMIT 5
         """, {"approval_id": approval["approval_id"]})
         possible_raw: list[str] = []
@@ -439,7 +493,8 @@ def lookup_numeric_trait(
                       "不能把其中疑似数字直接当作已确认结果：\n\n" +
                       "\n".join(f"- {item}" for item in possible_raw[:3]))
         elif not facts:
-            detail = "系统数据库中，该条审定记录的已整理数据及已保存原文均未检索到该指标数值。"
+            detail = ("系统数据库中，该份品种页面资料" if label.startswith("品种页面资料") else
+                      "系统数据库中，该条审定记录") + "的已整理数据及已保存原文均未检索到该指标数值。"
         if not facts:
             return _outcome(
             f"**{variety['variety_name']} · {label}**：未找到“{spec.name}”的已结构化可核对数值。"
@@ -449,6 +504,7 @@ def lookup_numeric_trait(
                        "detail": "原文待人工核对。" if possible_raw else "该审定记录未检索到该指标；未跨审定记录借值。",
                        "priority": 1}],
                 context=resolved_context,
+                fact_scope=_fact_scope(variety, approval, spec.code, []),
             )
     lines: list[str] = []
     evidence: list[dict] = []
@@ -470,4 +526,9 @@ def lookup_numeric_trait(
     note = "\n\n同一审定记录出现多个检测值，已逐条列出，未擅自取平均。" if len(facts) > 1 else ""
     return _outcome(f"**{variety['variety_name']} · {label}的{spec.name}**：\n\n" + "\n".join(lines) + note +
                     "\n\n可展开下方“查看原文与来源”核对依据。",
-                    evidence=evidence, context=resolved_context)
+                    evidence=evidence, context=resolved_context,
+                    fact_scope=_fact_scope(variety, approval, spec.code, [
+                        {"value": display_value({**fact, "trait_code": spec.code,
+                                                  "unit": fact.get("unit") or spec.unit}),
+                         "status": "unverified_original" if fact.get("from_raw") else "confirmed"}
+                        for fact in facts]))

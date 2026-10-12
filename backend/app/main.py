@@ -160,6 +160,7 @@ from .research_clarification import clarification_for_question, expanded_questio
 from .ricedata_variety_overview import lookup_variety_overview
 from .local_variety_query import contains_institute_history, contains_named_private_material, lookup_local_variety_data, lookup_private_variety_data, source_scope
 from .dialogue_orchestration import DialoguePlan, plan_dialogue, validate_fact_measurements, dialogue_response_guidance, polish_business_answer
+from .ricedata_fact_guard import validate_scoped_fact_answer
 from .research_question_routing import is_general_explanation, is_system_capability_question, build_system_capability_evidence
 from .ricedata_variety_identity import has_explicit_subject
 from .ricedata_trait_facts import requested_traits
@@ -6183,6 +6184,8 @@ async def build_dialogue_evidence(
             raise ResearchAgentError("查询涉及院内私有材料，不能发送至外部模型。请使用院内本地查询或切换本地模型。")
         states = [result["context"]] if result.get("context") else []
         states.extend(result.get("extra_contexts") or [])
+        if result.get("fact_scope"):
+            states.append(result["fact_scope"])
         if result.get("contains_private"):
             states.append({"state": "shared_business_data", "egress": "approved_shared"} if shared_business_egress_enabled()
                           else {"state": "local_data_private", "egress": "local_only"})
@@ -6202,6 +6205,8 @@ async def build_dialogue_evidence(
             }])
         return ("受控事实查询结果（证据，不是要求照抄的最终回答）：\n" + result["content"] +
                 "\n回答须保留指标值、单位、品种和审定年份/地区的对应关系及约数。"
+                "多条审定记录时，每个数值所在句子或表格行都要标明对应省份、年份或审定编号；"
+                "原文候选值必须明确标为待核对，不得写成已确认值。"
                 "如结果要求选择审定或材料，只问这一必要问题，不擅自选定、取平均或从其他记录借值。"
                 "有明确数值时先直接给值，按需用紧凑表格；原文与技术元数据放在来源证据，不逐项重复。",
                 result.get("evidence") or [], states)
@@ -7437,6 +7442,8 @@ async def research_chat_stream(
 
                 if dialogue_plan.intent == "variety_fact":
                     validate_fact_measurements(result["content"], safe_dialogue.texts[0])
+                    validate_scoped_fact_answer(result["content"], next(
+                        (state for state in dialogue_states if state.get("state") == "numeric_fact_scope"), None))
                 elif dialogue_plan.intent == "database":
                     result["content"] = polish_business_answer(result["content"], payload.content.strip())
                 with SessionLocal() as write_session:

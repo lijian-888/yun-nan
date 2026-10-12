@@ -254,6 +254,7 @@ def lookup_local_variety_data(session: Session, question: str, history: list[Any
             "contains_private": bool(core_matches) or scope == "institute",
             "context": contexts[0] if len(contexts) == 1 else {"state": "local_query_reset", "reason": "multiple_sources"},
             "extra_contexts": [{"state": "local_source_context", "scope": scope}],
+            "fact_scope": public_result.get("fact_scope") if len(results) == 1 and public_result else None,
             "pending": next((r["pending"] for _, r in results if r.get("pending")), None)}
 
 

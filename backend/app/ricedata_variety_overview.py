@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .ricedata_variety_identity import has_explicit_subject, resolve_varieties
-from .ricedata_trait_lookup import _history_context
+from .ricedata_trait_lookup import _approval_label, _history_context
 from .rice_query_presentation import (
     cell, display_value, group_label, number, source_excerpts, table, trait_label,
     trial_label, yield_change, yield_year,
@@ -72,22 +72,20 @@ def lookup_variety_overview(
     """, {"variety_id": variety["variety_id"]})
     lines = [f"## {cell(variety['variety_name'])} · 表型资料",
              "数据来源：国家水稻数据中心（系统数据库已收录）。",
-             "各审定记录分别展示；审定年份不等于试验或检测年份，未跨记录合并数值。"]
+             "各来源记录分别展示；审定年份不等于试验或检测年份，未跨记录合并数值。"]
     evidence = []
     source_url = variety.get("source_url")
     if not approvals:
         lines.append("系统数据库未收录该品种的审定记录或表型数值。")
     for approval in approvals[:20]:
         approval_id = approval["approval_id"]
-        label = " · ".join(str(part) for part in (
-            f"{approval['approval_year']}年" if approval.get("approval_year") else "年份未载明",
-            approval.get("approval_region"), approval.get("approval_no")) if part)
+        label = _approval_label(approval)
         lines.append(f"### {cell(label)}")
         facts = _rows(session, """
             SELECT m.trait_code, m.trait_name, m.value_numeric, m.value_min, m.value_max,
                    m.value_text, m.unit, m.observation_year, m.observation_region, m.source_text
-            FROM ricedata.rice_variety_trait_measurement m
-            JOIN ricedata.rice_variety_trait_summary s ON s.trait_summary_id = m.trait_summary_id
+            FROM agent_query.ricedata__rice_variety_trait_measurement m
+            JOIN agent_query.ricedata__rice_variety_trait_summary s ON s.trait_summary_id = m.trait_summary_id
             WHERE s.approval_id = :approval_id
             ORDER BY m.trait_measurement_id LIMIT 61
         """, {"approval_id": approval_id})
@@ -95,7 +93,7 @@ def lookup_variety_overview(
             SELECT trait_code, trait_name, value_numeric, value_min, value_max,
                    value_text, unit, qualifier, source_excerpt AS source_text, source_field,
                    NULL::smallint AS observation_year, NULL::text AS observation_region
-            FROM ricedata.rice_variety_narrative_fact
+            FROM agent_query.ricedata__rice_variety_narrative_fact
             WHERE approval_id = :approval_id AND review_status IN ('machine_extracted', 'verified')
             ORDER BY narrative_fact_id LIMIT 61
         """, {"approval_id": approval_id})
@@ -129,7 +127,7 @@ def lookup_variety_overview(
         yields = _rows(session, """
             SELECT trial_year, covered_years, is_aggregate, trial_type, trial_region,
                    yield_kg_per_mu, control_name, relative_change_pct, review_status, source_sentence
-            FROM ricedata.rice_variety_yield_observation
+            FROM agent_query.ricedata__rice_variety_yield_observation
             WHERE approval_id = :approval_id AND yield_kg_per_mu IS NOT NULL
             ORDER BY evidence_order, yield_observation_id LIMIT 21
         """, {"approval_id": approval_id})
@@ -147,7 +145,7 @@ def lookup_variety_overview(
                 lines.append("- 其余产量记录请指定年份或试验类型查询。")
         summaries = _rows(session, """
             SELECT characteristics_raw_text
-            FROM ricedata.rice_variety_trait_summary
+            FROM agent_query.ricedata__rice_variety_trait_summary
             WHERE approval_id = :approval_id AND characteristics_raw_text IS NOT NULL
             ORDER BY trait_summary_id LIMIT 3
         """, {"approval_id": approval_id})

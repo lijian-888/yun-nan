@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.ricedata_trait_facts import extract_narrative_facts, requested_traits
@@ -10,9 +11,18 @@ from app.ricedata_trait_lookup import (
     _approval_followup, lookup_numeric_trait, variety_context_from_question,
 )
 from app.ricedata_variety_overview import lookup_variety_overview
+from app.ricedata_yield_candidates import extract_yield_candidates
+from app.ricedata_fact_guard import validate_scoped_fact_answer
 
 
 class NarrativeExtractionTests(unittest.TestCase):
+    def test_yield_candidates_require_an_explicit_mu_basis(self):
+        source = "1993—1994年区试平均亩产556.6Kg，1995—1996年生产试验亩产568.9Kg；单产610kg/hm2。"
+        candidates = extract_yield_candidates(source)
+        self.assertEqual([str(row["value"]) for row in candidates], ["556.6", "568.9"])
+        self.assertTrue(all(row["status"] == "unverified_original" for row in candidates))
+        self.assertFalse(extract_yield_candidates("单产530Kg；最高单产630千克。"))
+
     def test_yield_paragraph_keeps_approximation_and_provenance(self):
         text = "每亩有效穗22万左右，每穗实粒数105粒左右，结实率92%左右，千粒重27克左右。"
         facts = extract_narrative_facts("yield_performance_text", text)
@@ -66,6 +76,47 @@ class ApprovalLookupIntegrationTests(unittest.TestCase):
             result = lookup_numeric_trait(session, "D优130四川2003年审定的直链淀粉含量是多少？")
             self.assertIn("未找到", result["content"])
             self.assertNotIn("24.1%", result["content"])
+
+    def test_original_yield_candidate_is_visible_but_not_confirmed(self):
+        with Session(self.engine) as session:
+            result = lookup_numeric_trait(session, "抚粳3号（辽粳64）辽宁1997年的亩产是多少？")
+            self.assertIn("556.6", result["content"])
+            self.assertIn("568.9", result["content"])
+            self.assertIn("待核对", result["content"])
+            self.assertNotIn("已确认亩产", result["content"])
+
+    def test_all_exact_name_collisions_are_presented(self):
+        with Session(self.engine) as session:
+            result = lookup_numeric_trait(session, "R18的株高是多少？")
+            self.assertIn("607864", result["content"])
+            self.assertIn("627667", result["content"])
+            self.assertEqual(result["content"].count("（"), 9)
+
+    def test_page_record_is_not_labelled_as_formal_approval(self):
+        with Session(self.engine) as session:
+            result = lookup_numeric_trait(session, "安粳优122的株高是多少？")
+            self.assertIn("品种页面资料", result["content"])
+            self.assertNotIn("这条审定记录", result["content"])
+
+    def test_least_privilege_api_role_can_read_public_trait_views(self):
+        with Session(self.engine) as session:
+            role_exists = session.scalar(text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='ynaas_longyun_api')"))
+            if not role_exists:
+                self.skipTest("Yunnan API role is not installed")
+            session.execute(text("SET LOCAL ROLE ynaas_longyun_api"))
+            result = lookup_numeric_trait(session, "D优130福建2006年的直链淀粉含量是多少？")
+            self.assertIn("24.1%", result["content"])
+            overview = lookup_variety_overview(session, "D优130的全部表型数据")
+            self.assertIn("24.1%", overview["content"])
+
+    def test_scoped_guard_accepts_record_bound_tool_outputs(self):
+        with Session(self.engine) as session:
+            for question in ("D优130福建2006年的直链淀粉含量是多少？",
+                             "D优130全部审定记录的直链淀粉含量",
+                             "抚粳3号（辽粳64）辽宁1997年的亩产是多少？"):
+                with self.subTest(question=question):
+                    result = lookup_numeric_trait(session, question)
+                    validate_scoped_fact_answer(result["content"], result["fact_scope"])
 
     def test_malformed_source_number_is_flagged_for_review(self):
         with Session(self.engine) as session:

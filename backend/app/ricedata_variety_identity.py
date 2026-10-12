@@ -36,7 +36,7 @@ def explicit_name_mention(question: str, name: str | None) -> bool:
 
 
 def select_name_matches(question: str, candidates: list[dict], *, name_key: str = "variety_name",
-                        alias_keys: tuple[str, ...] = ("trial_names", "former_names"), limit: int = 8) -> list[dict]:
+                        alias_keys: tuple[str, ...] = ("trial_names", "former_names"), limit: int | None = None) -> list[dict]:
     """Suppress contained names at the SAME occurrence, not other named subjects."""
     mentions = []
     for index, row in enumerate(candidates):
@@ -53,7 +53,7 @@ def select_name_matches(question: str, candidates: list[dict], *, name_key: str 
         other_start <= start and other_end >= end and other_end - other_start > end - start
         for other_start, other_end, _ in mentions)]
     indexes = list(dict.fromkeys(index for _, index in sorted(winners)))
-    return [candidates[index] for index in indexes[:limit]]
+    return [candidates[index] for index in (indexes if limit is None else indexes[:limit])]
 
 
 def has_explicit_subject(question: str) -> bool:
@@ -86,7 +86,7 @@ def has_explicit_subject(question: str) -> bool:
     return bool(re.sub(r"[\s，,。！？?！；;：:（）()、]+", "", value))
 
 
-def resolve_varieties(session: Session, question: str, *, limit: int = 8) -> list[dict[str, Any]]:
+def resolve_varieties(session: Session, question: str, *, limit: int | None = None) -> list[dict[str, Any]]:
     """Resolve independent mentions without letting `3号` steal `国稻3号`."""
     source_id = _SOURCE_ID.search(question)
     if source_id:
@@ -106,6 +106,5 @@ def resolve_varieties(session: Session, question: str, *, limit: int = 8) -> lis
                     WHERE alias_name <> '' AND strpos(lower(:question), lower(alias_name)) > 0)
         )
         ORDER BY char_length(regexp_replace(variety_name, '[（(].*$', '')) DESC, variety_id
-        LIMIT 300
     """), {"question": question}).mappings()]
     return select_name_matches(question, candidates, limit=limit)
