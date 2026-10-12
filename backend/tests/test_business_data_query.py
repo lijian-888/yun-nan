@@ -81,13 +81,13 @@ class QueryCompilerTests(unittest.TestCase):
                         'trait':{'value':24.1},'email':'owner@example.com'}})
         self.assertEqual(clean['metadata'],{'trait':{'value':24.1}})
 
-    def test_completeness_catalog_keeps_business_name_but_reads_cached_projection(self):
+    def test_completeness_catalog_keeps_business_name_but_reads_snapshot(self):
         cached=dataset('ai.completeness_summary',['data_dimension','material_coverage_rate',
             'snapshot_refreshed_at'])
-        cached['query_view']='ai_completeness_cached'
+        cached['query_view']='completeness_summary_snapshot'
         sql,_=compile_business_query(DataQuery(relation='ai.completeness_summary',
             columns=['data_dimension','material_coverage_rate']),[cached])
-        self.assertIn('agent_query."ai_completeness_cached"',sql)
+        self.assertIn('agent_query."completeness_summary_snapshot"',sql)
         self.assertNotIn('ai__completeness_summary',sql)
 
     def test_shared_flag_does_not_allow_private_attachments_or_credentials(self):
@@ -207,7 +207,7 @@ class RealBusinessQueryTests(unittest.TestCase):
             SELECT query_view FROM agent_query.dataset_registry
             WHERE dataset_id='ai.completeness_summary'
         """)).scalar_one_or_none()
-        if registered!='ai_completeness_cached':
+        if registered!='completeness_summary_snapshot':
             self.skipTest('Apply completeness snapshot migration first')
         result=execute_business_query(self.session,DataQuery.model_validate({
             'relation':'ai.completeness_summary',
@@ -216,6 +216,7 @@ class RealBusinessQueryTests(unittest.TestCase):
             'limit':30}))
         self.assertGreaterEqual(result['returned_rows'],10)
         self.assertIn('snapshot_refreshed_at',result)
+        self.assertIs(result['snapshot_stale'],False)
         self.assertTrue(all(int(row['material_count']) >= int(row['materials_missing'])
                             for row in result['rows']))
 

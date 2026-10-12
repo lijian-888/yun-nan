@@ -132,9 +132,12 @@ API账号仅获这些视图的SELECT权限，不开放整个`core`或`ai`架构�
 
 `ai.completeness_summary` 会重复计算全院材料多项覆盖度统计，已在服务器上实测触发 8 秒查询超时。
 备份后由数据库管理员运行 `migrations/004_completeness_summary_snapshot.sql`：先计算
-`agent_query.completeness_summary_snapshot`，成功后才把业务目录的这一项指向缓存投影视图。
+`agent_query.completeness_summary_snapshot`，成功后才把业务目录的这一项直接指向只读物化结果。
 原始视图、其他业务数据集和原始行均不变；失败时不会把业务目录指向未填充的快照。
-用户仍按自然语言询问完整性，结果须说明 `snapshot_refreshed_at`，不能称为实时统计。
+用户仍按自然语言询问完整性，结果须说明 `snapshot_refreshed_at`，不能称为实时统计；
+超过 48 小时未刷新时明确标记过期，空快照不能被解释为院内没有数据。
+已运行旧版 004 的服务器先执行 `migrations/005_remove_redundant_completeness_proxy.sql`，
+删除曾经多加的一层缓存投影视图，不触碰业务源视图或原始行。
 
 日常在服务器安静时段执行 `bash deploy/ynaas-193/refresh_completeness_summary.sh`；
 已导入新一批源数据后也执行同一脚本。刷新失败时保留上一次成功快照及其时间，
