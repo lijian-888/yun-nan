@@ -38,6 +38,18 @@ PRIVATE_MARKERS = re.compile(
 )
 LOCAL_ONLY = re.compile(r"(?:不要|不用|禁止|无需|别)(?:使用)?(?:联网|搜索|检索|tavily)|仅(?:从|用|使用)?(?:本地|知识库)", re.I)
 SEARCH_ACTION = re.compile(r"(?:帮我|请|再|继续)?(?:搜索|检索|查找|找到|查询|搜一下|查一下|search\s+for|search|find)\s*[：:]?\s*", re.I)
+TRAILING_SEARCH_INSTRUCTION = re.compile(
+    r"[，,。；;？?\n]\s*(?:请|再|然后|同时)?\s*(?:通过|结合|使用|用|利用|基于)?\s*"
+    r"(?:联网|网上|网络|Tavily).{0,16}(?:检索|搜索|查询|查找).*$", re.I | re.S,
+)
+FOCUS_EQUIVALENTS = {
+    "稻瘟病": ("rice blast", "magnaporthe oryzae", "pyricularia oryzae"),
+    "白叶枯病": ("bacterial blight", "xanthomonas oryzae"),
+    "纹枯病": ("sheath blight", "rhizoctonia solani"),
+    "耐盐": ("salt tolerance", "salinity", "salt stress"),
+    "耐旱": ("drought tolerance", "drought stress"),
+    "抗倒伏": ("lodging resistance", "lodging"),
+}
 PAGE_READ_ACTION = re.compile(r"总结|概述|概括|介绍|提炼|归纳|摘要|阅读|读取|浏览|打开|看看|有什么|哪些信息|讲了什么|说了什么|summari[sz]e|overview|read|explain|what.*(?:page|site)", re.I)
 MAX_PUBLIC_PAGE_CHARS = 18000
 IMAGE_PLACEHOLDER = "【图片内容未识别，不可推断数字】"
@@ -150,6 +162,9 @@ def needs_current_public_search(question: str) -> bool:
 
 def _explicit_target(question: str) -> str:
     text = URL_PATTERN.sub(" ", question)
+    # A trailing instruction such as "通过联网检索和本地知识库回答我" is
+    # *not* the research topic. Remove it before locating a search action.
+    text = TRAILING_SEARCH_INSTRUCTION.sub("", text)
     actions = list(SEARCH_ACTION.finditer(text))
     if actions:
         text = text[actions[-1].end():]
@@ -220,6 +235,37 @@ def _relevant(query: str, title: str, content: str) -> bool:
         else:
             grams.add(token)
     return bool(grams) and sum(term in haystack for term in grams) / len(grams) >= 0.45
+
+
+def _matches_original_focus(question: str, title: str, content: str) -> bool:
+    """An independent guard against a search query that lost the user's topic.
+
+    Broad crop/method words alone are not discriminative.  For an explicit
+    disease or stress, require its name (or a known English equivalent) in
+    the returned title/snippet before exposing the hit as evidence.
+    """
+    focus = [term for term in FOCUS_EQUIVALENTS if term in question]
+    if not focus:
+        return True
+    source = _normalized(title + " " + content)
+    return any(_normalized(alias) in source
+               for term in focus for alias in (term, *FOCUS_EQUIVALENTS[term]))
+
+
+def _topical_discovery(question: str, query: str) -> bool:
+    """Questions about a topic need related sources, not an exact title match."""
+    if re.search(r"《[^》]+》|\b10\.\d{4,9}/\S+", question, re.I):
+        return False
+    return _topic_literature_request(question) or bool(
+        any(term in question for term in FOCUS_EQUIVALENTS)
+        and re.search(r"什么|哪些|如何|为什么|因素|原因|相关|有关|问题", query)
+    )
+
+
+def _research_source(url: str) -> bool:
+    """Unlisted domains enter only as article/PDF candidates, not blogs."""
+    path = urlsplit(url).path.lower()
+    return bool(re.search(r"(?:\.pdf$|/article/|/articles/|/doi/|/pubmed/|/pmc\d+)", path))
 
 
 def _error_note(status: int | None = None) -> str:
@@ -327,7 +373,7 @@ async def search_public_references(question: str, *, model_requested: bool = Fal
     if not query:
         return [], "请单独提供不超过300字的公开检索标题、品种名或关键词。"
     explicit = _explicit_search(question)
-    topic_literature = _topic_literature_request(question) and not domains
+    topical = _topical_discovery(question, query) and not domains
     results: list[PublicSearchResult] = []
     notes: list[str] = []
     urls = _requested_urls(question)
@@ -357,7 +403,11 @@ async def search_public_references(question: str, *, model_requested: bool = Fal
                 snippet = re.sub(r"\s+", " ", str(item.get("content") or "")).strip()
                 is_detail = urlsplit(url).path not in {"", "/"}
                 is_patent = "patent" in _domain(urlsplit(url).hostname or "") or "专利" in title
-                if (snippet and ((topic_literature and is_detail and not is_patent)
+                if (snippet and _matches_original_focus(question, title, snippet)
+                    and ((topical and is_detail and not is_patent
+                          and (trusted or _research_source(url))
+                          and (any(term in question for term in FOCUS_EQUIVALENTS)
+                               or _relevant(query, title, snippet)))
                                  or (trusted and (not explicit or query in domains or _relevant(query, title, snippet))))):
                     results.append(PublicSearchResult(title, url, snippet[:1800],
                                                       kind if trusted else "public_search_candidate"))
@@ -387,7 +437,8 @@ async def search_public_references(question: str, *, model_requested: bool = Fal
                         if not existing and not _trusted(url, domains)[0]:
                             continue
                         title = existing.title if existing else str(item.get("title") or url)
-                        if not topic_literature and query not in domains and not _relevant(query, title, body):
+                        if (not _matches_original_focus(question, title, body)
+                            or (not topical and query not in domains and not _relevant(query, title, body))):
                             continue
                         excerpt, truncated, unreadable = _page_excerpt(_focused_excerpt(body, query), limit=5000)
                         result = PublicSearchResult(title, url, excerpt,

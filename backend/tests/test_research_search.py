@@ -29,6 +29,19 @@ class QueryTests(unittest.TestCase):
         self.assertTrue(search._topic_literature_request(question))
         self.assertFalse(search._topic_literature_request("检索论文《水稻耐盐育种研究》"))
 
+    def test_trailing_web_instruction_keeps_actual_research_topic(self):
+        question = "水稻稻瘟病和什么问题有关，通过联网检索和本地知识库回答我。"
+        self.assertEqual(search.build_safe_public_query(question)[0], "水稻稻瘟病和什么问题有关")
+        self.assertFalse(search._matches_original_focus(question,
+            "在本地计算机上利用AnythingLLM构建大模型知识库", "DeepSeek 本地知识库实验"))
+        self.assertTrue(search._matches_original_focus(question,
+            "水稻稻瘟病发生的影响因素", "温湿度与病原菌侵染"))
+        self.assertTrue(search._matches_original_focus(question,
+            "Rice blast resistance", "Magnaporthe oryzae infection"))
+        self.assertTrue(search._topical_discovery(question, "水稻稻瘟病和什么问题有关"))
+        self.assertTrue(search._research_source("https://journal.example.org/article/doi/10.1234/rice"))
+        self.assertFalse(search._research_source("https://blog.example.org/rice-blast"))
+
     def test_local_only(self):
         for question in ["不要联网，搜索水稻文献", "仅从本地知识库检索水稻", "查询知识库中的水稻论文"]:
             self.assertFalse(search.needs_current_public_search(question), question)
@@ -161,6 +174,27 @@ class TavilyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0].source_kind, "public_search_candidate")
         self.assertEqual(results[0].retrieval_method, "search+extract")
+
+    async def test_unrelated_web_hit_never_becomes_rice_blast_evidence(self):
+        question = "水稻稻瘟病和什么问题有关，通过联网检索和本地知识库回答我。"
+        article = "https://www.example.edu.cn/rice/blast"
+        def handler(request):
+            if request.url.path == "/extract":
+                return httpx.Response(200, json={"results": [{"url": article,
+                    "raw_content": "水稻稻瘟病的发生与病原、品种抗性及气象条件有关。"}]})
+            return httpx.Response(200, json={"results": [
+                {"title": "在本地计算机上利用AnythingLLM构建大模型知识库", "url": "https://www.example.edu.cn/ai/anythingllm",
+                 "content": "本地知识库回答问题"},
+                {"title": "水稻稻瘟病发生的影响因素", "url": article,
+                 "content": "水稻稻瘟病与病原、温湿度和品种抗性有关"},
+                {"title": "水稻稻瘟病怎么防治", "url": "https://blog.example.org/rice-blast",
+                 "content": "稻瘟病防治经验"},
+            ]})
+        (results, _), calls = await self.execute(question, handler)
+        self.assertEqual(calls[0][1]["query"], "水稻稻瘟病和什么问题有关")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].url, article)
+        self.assertEqual(calls[1][1]["urls"], [article])
 
     async def test_direct_detail_extract_when_search_empty(self):
         url = "https://www.ricedata.cn/variety/35"
