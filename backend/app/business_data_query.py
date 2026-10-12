@@ -24,7 +24,9 @@ from .dialogue_orchestration import model_json_request
 from .research_agent import ResearchAgentError
 
 
-logger = logging.getLogger(__name__)
+# Use the application's configured Uvicorn logger; the root logger does not
+# necessarily emit INFO in production, and query timing must remain observable.
+logger = logging.getLogger("uvicorn.error")
 
 
 class BusinessQueryError(ValueError):

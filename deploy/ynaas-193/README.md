@@ -128,6 +128,23 @@ API账号仅获这些视图的SELECT权限，不开放整个`core`或`ai`架构�
 测试：`test_business_data_query.py` 含真实数据库及HTTP权限测试；
 `live_business_query_check.py --run-live` 在部署容器中验证真实模型与服务器业务查询，不创建测试业务记录。
 
+## 完整性汇总快照
+
+`ai.completeness_summary` 会重复计算全院材料多项覆盖度统计，已在服务器上实测触发 8 秒查询超时。
+备份后由数据库管理员运行 `migrations/004_completeness_summary_snapshot.sql`：先计算
+`agent_query.completeness_summary_snapshot`，成功后才把业务目录的这一项指向缓存投影视图。
+原始视图、其他业务数据集和原始行均不变；失败时不会把业务目录指向未填充的快照。
+用户仍按自然语言询问完整性，结果须说明 `snapshot_refreshed_at`，不能称为实时统计。
+
+日常在服务器安静时段执行 `bash deploy/ynaas-193/refresh_completeness_summary.sh`；
+已导入新一批源数据后也执行同一脚本。刷新失败时保留上一次成功快照及其时间，
+应从日志排障而不能假称数据已更新。生产主机以项目专用 cron 每天 02:15 运行，
+通过 `flock` 避免重叠，日志写到云南项目的数据导入目录。该脚本只连接云南数据库容器，
+不影响同机其他项目。若删除定时任务，需同时明确改用手动刷新。
+
+业务查询日志只记录任务号、数据集、耗时、结果状态/行数或 SQLSTATE，
+不记录 SQL 参数、业务行内容和模型密钥；依据实测耗时再决定是否缓存其他视图。
+
 ## 2026-10-10 根系查询退役
 
 根系查询入口、字段目录、导入/发布分支及 ORM 模型已移除，应用启动不再创建专用表。

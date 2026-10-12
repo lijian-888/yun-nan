@@ -1,0 +1,1 @@
+15 2 * * * /usr/bin/flock -n /home/lijian/apps/ynaas-trial-data-import/.completeness-refresh.lock /bin/bash /home/lijian/apps/ynaas-trial/deploy/ynaas-193/refresh_completeness_summary.sh >> /home/lijian/apps/ynaas-trial-data-import/completeness-refresh.log 2>&1
