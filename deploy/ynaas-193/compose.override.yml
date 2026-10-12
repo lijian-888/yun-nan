@@ -28,6 +28,10 @@ services:
       # Private attachments/conversations of other users and credentials remain blocked.
       ALLOW_SHARED_BUSINESS_EGRESS: "true"
       DEMO_DATA_ENABLED: "false"
+      YNAAS_TEACHER_FILES_DIR: /data/teacher-source-files
+    volumes:
+      # Only the four approved teacher folders are copied here; the source is read-only.
+      - /home/lijian/apps/ynaas-trial-teacher-files:/data/teacher-source-files:ro
     mem_limit: 4g
     cpus: 3
 

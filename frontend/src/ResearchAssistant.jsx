@@ -656,7 +656,7 @@ export default function ResearchAssistant({ platformContext }) {
         </section>
         <section className="research-workspace-group" aria-label="管理">
           <small>管理</small>
-          <button type="button" className={workspace === "structured" ? "active" : ""} onClick={() => { setWorkspace("structured"); setNotice(""); }}><Search size={16} />结构化查询</button>
+          <button type="button" className={workspace === "structured" ? "active" : ""} onClick={() => { setWorkspace("structured"); setNotice(""); }}><Search size={16} />品种与原文件</button>
           <button type="button" className={workspace === "intelligence" ? "active" : ""} onClick={() => setWorkspace("intelligence")}><Scale size={16} />种质解析与亲本推荐</button>
           <button type="button" className={workspace === "trial-analysis" ? "active" : ""} onClick={() => setWorkspace("trial-analysis")}><BarChart3 size={16} />田间试验自动分析</button>
           <button type="button" className={workspace === "genotype" ? "active" : ""} onClick={() => setWorkspace("genotype")}><Dna size={16} />基因型导入与质控</button>
@@ -678,7 +678,7 @@ export default function ResearchAssistant({ platformContext }) {
     </aside>
 
     <main className={`research-main ${workspace === "knowledge" ? "knowledge-main" : workspace === "structured" ? "structured-main" : workspace === "gwas" ? "gwas-main" : workspace === "genotype" ? "genotype-main" : workspace === "skills" ? "skills-main" : workspace === "results" ? "results-main" : workspace === "intelligence" || workspace === "trial-analysis" ? "intelligence-main" : ""}`}>
-      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "基因型数据" : workspace === "structured" ? "服务器品种与共享材料数据" : workspace === "assistant" && businessPolicy?.shared_workspace ? "服务器业务数据按权限共享查询" : "仅查询院内已发布数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : "结构化查询"}</h1></div></header>}
+      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "基因型数据" : workspace === "structured" ? "国家水稻数据中心品种检索与院内原始文件" : workspace === "assistant" && businessPolicy?.shared_workspace ? "服务器业务数据按权限共享查询" : "仅查询院内已发布数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : workspace === "structured" ? "品种与原文件" : "结构化查询"}</h1></div></header>}
 
       {notice && <div className="assistant-notice"><span>{notice}</span><button title="关闭提示" onClick={() => setNotice("")}><X size={16} /></button></div>}
 

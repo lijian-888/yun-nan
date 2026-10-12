@@ -1,0 +1,18 @@
+.teacher-files { border-top: 1px solid #dce9e2; padding-top: 20px; }
+.teacher-files-intro h3 { margin: 0 0 5px; }
+.teacher-files-intro p { margin: 0; }
+.teacher-files-crumbs { display: flex; flex-wrap: wrap; gap: 3px; margin: 18px 0; color: #66877b; font-size: 13px; }
+.teacher-files-crumbs button { border: 0; padding: 0 3px; color: #176853; background: none; cursor: pointer; }
+.teacher-files-toolbar { display: flex; gap: 12px; align-items: center; margin: 0 0 12px; }
+.teacher-files-toolbar label { display: flex; flex: 1; gap: 8px; align-items: center; min-width: 0; border: 1px solid #b9d5c9; border-radius: 5px; padding: 0 10px; }
+.teacher-files-toolbar input { width: 100%; min-width: 0; border: 0!important; outline: 0; }
+.teacher-files-count { margin: 10px 0; }
+.teacher-files-table-scroll { overflow: auto; }
+.teacher-files-table-scroll table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.teacher-files-table-scroll th, .teacher-files-table-scroll td { border-bottom: 1px solid #dce9e2; padding: 11px; text-align: left; }
+.teacher-files-table-scroll th { background: #edf6f1; }
+.teacher-files-table-scroll td:first-child { max-width: 520px; overflow-wrap: anywhere; }
+.teacher-files-name, .teacher-files-action { display: inline-flex; align-items: center; gap: 7px; border: 0; padding: 2px; color: #176853; background: none; cursor: pointer; text-align: left; }
+.teacher-files-action { white-space: nowrap; }
+.teacher-files-note { margin: 14px 0 0; }
+@media (max-width: 760px) { .teacher-files-toolbar { flex-wrap: wrap; } .teacher-files-toolbar label { flex-basis: 100%; } }

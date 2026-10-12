@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Search, X, LoaderCircle, Download, Plus } from "lucide-react";
 import { request, jsonRequest } from "./api";
+import TeacherSourceFilesWorkspace from "./TeacherSourceFilesWorkspace";
 import "./VarietySearchWorkspace.css";
 
 const defaults = (source = "ricedata") => ({ source, keyword: "", field: "name", fuzzy: true, rice_type: "", kind: "", glutinous: false, upland: false, approved_only: false, region: "", approval_year: null, traits: [], has_phenotype: false, has_genotype: false, confirmed_only: false, sort: "name", page: 1, page_size: 20 });
@@ -86,9 +87,11 @@ export default function VarietySearchWorkspace() {
   }
 
   const fields = national ? [["name", "品种名及别名"], ["alias", "别名"], ["identifier", "来源品种编号"], ["parentage", "亲本来源"], ["breeder", "育种 / 申报单位"], ["approval_no", "审定编号"]] : [["name", "材料名及别名"], ["alias", "别名"], ["identifier", "材料编号"], ["parentage", "亲本来源"], ["location", "记录地点"]];
+  const sourceTabs = <nav className="vs-sources" aria-label="数据来源"><button type="button" aria-pressed={national} onClick={() => switchSource("ricedata")}>国家水稻数据中心{catalog?.sources?.find(source => source.code === "ricedata")?.count != null && <small>{catalog.sources.find(source => source.code === "ricedata").count.toLocaleString()} 条</small>}</button><button type="button" aria-pressed={!national} onClick={() => switchSource("institute")}>院内原始文件</button></nav>;
+  if (!national) return <section className="variety-search-workspace"><header><div><h2>院内原始文件</h2><p>浏览服务器上的老师文件夹及文件元数据，按需打开原始资料。</p></div></header>{sourceTabs}<TeacherSourceFilesWorkspace /></section>;
   return <section className="variety-search-workspace">
     <header><div><h2>品种与材料检索</h2><p>直接查询服务器数据，无需了解数据库或编写 SQL。点击名称查看详细资料。</p></div></header>
-    <nav className="vs-sources" aria-label="数据来源">{(catalog?.sources || [{ code: "ricedata", name: "国家水稻数据中心" }, { code: "institute", name: "院内共享材料" }]).map(source => <button type="button" key={source.code} aria-pressed={source.code === draft.source} onClick={() => switchSource(source.code)}>{source.name}{source.count != null && <small>{source.count.toLocaleString()} 条</small>}</button>)}</nav>
+    {sourceTabs}
     <form noValidate onSubmit={e => { e.preventDefault(); search({ ...draft, page: 1 }); }}>
       <div className="vs-search-row"><select aria-label="检索字段" value={draft.field} onChange={e => patch({ field: e.target.value })}>{fields.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input aria-label="检索关键词" maxLength={120} placeholder={national ? "输入品种名、别名或其他关键词，例如南粳9212" : "输入材料名、别名或材料编号"} value={draft.keyword} onChange={e => patch({ keyword: e.target.value })} /><button className="primary-button" disabled={busy} type="submit">{busy ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}检索</button><button className="secondary-button" type="button" onClick={() => { searchController.current?.abort(); setDraft(defaults(draft.source)); setResult(null); setError(""); setBusy(false); }}>重置</button></div>
       <div className="vs-filters"><label><input type="checkbox" checked={draft.fuzzy} onChange={e => patch({ fuzzy: e.target.checked })} />模糊检索</label>
