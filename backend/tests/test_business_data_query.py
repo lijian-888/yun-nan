@@ -216,7 +216,7 @@ class RealBusinessQueryTests(unittest.TestCase):
             'limit':30}))
         self.assertGreaterEqual(result['returned_rows'],10)
         self.assertIn('snapshot_refreshed_at',result)
-        self.assertIs(result['snapshot_stale'],False)
+        self.assertNotIn('snapshot_stale',result)
         self.assertTrue(all(int(row['material_count']) >= int(row['materials_missing'])
                             for row in result['rows']))
 
