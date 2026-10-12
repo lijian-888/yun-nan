@@ -10,18 +10,18 @@ from app.research_search import build_public_web_context, search_public_referenc
 
 
 CASES = [
-    ("水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我。", "倒伏"),
-    ("水稻稻瘟病和什么问题有关，通过上网检索和本地知识来回答我。", "稻瘟病"),
-    ("玉米密植会怎样影响产量？请查找网络资料回答。", "密植"),
+    ("水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我。", ("倒伏",)),
+    ("水稻稻瘟病和什么问题有关，通过上网检索和本地知识来回答我。", ("稻瘟病",)),
+    ("玉米密植会怎样影响产量？请查找网络资料回答。", ("密植", "密度")),
 ]
 
 
 async def main(answer: bool):
     provider = provider_settings()
-    for index, (question, subject) in enumerate(CASES):
+    for index, (question, subjects) in enumerate(CASES):
         plan = await plan_dialogue(provider=provider, question=question, history=[])
         print("PLAN", json.dumps(plan.model_dump(), ensure_ascii=False), flush=True)
-        assert plan.needs_web and subject in plan.web_question
+        assert plan.needs_web and any(subject in plan.web_question for subject in subjects)
         assert "知识库" not in plan.web_query and "回答我" not in plan.web_query
         sources, note = await search_public_references(question, model_requested=plan.needs_web,
             research_question=plan.web_question, search_query=plan.web_query, provider=provider)
@@ -39,7 +39,7 @@ async def main(answer: bool):
                     response_guidance=dialogue_response_guidance(plan)):
                 if event.get("type") == "complete":
                     content = event["content"]
-                    print("ANSWER", content, flush=True)
+                    print("ANSWER", event.get("response_mode"), content, flush=True)
                     assert any(item.url in content for item in sources), "Answer must cite a retrieved source"
                     assert "没有返回与水稻倒伏直接相关" not in content
     print("LIVE_PUBLIC_RESEARCH_OK", flush=True)

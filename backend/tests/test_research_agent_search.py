@@ -107,7 +107,7 @@ class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Tavily 额度受限", events[-1]["content"])
 
     async def test_explicit_web_and_local_knowledge_request_does_not_invent_factors(self):
-        context = build_public_web_context([], "可信公开来源中未找到相关内容")
+        context = build_public_web_context([], "可信公开来源中未找到相关内容", research_question="哪些因素导致水稻倒伏？")
         question = "水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我。"
         verified = "本次问题未检索到可用于支撑结论的本地知识库资料。"
         self.assertIsNotNone(agent._requested_evidence_unavailable_answer(question, verified, context))
