@@ -454,6 +454,7 @@ async def search_public_references(question: str, *, model_requested: bool = Fal
                                                       kind if trusted else "public_search_candidate"))
             if provider is not None:
                 results = await _select_relevant_sources(provider, research_question, results)
+                results.sort(key=lambda item: item.source_kind == "public_search_candidate")
             logger.info("Tavily search completed: mode=%s domains=%s raw_count=%s accepted_count=%s",
                         "explicit" if explicit else "generic", domains, len(raw_results), len(results))
             # Extract a requested page or the best relevant detail pages.
