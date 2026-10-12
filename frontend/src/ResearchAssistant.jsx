@@ -14,7 +14,9 @@ import {
   LogOut,
   MessageSquarePlus,
   Paperclip,
+  Pause,
   Pencil,
+  Play,
   Plus,
   Search,
   Scale,
@@ -380,6 +382,9 @@ export default function ResearchAssistant({ platformContext }) {
   const [progress, setProgress] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [canPause, setCanPause] = useState(false);
+  const [pauseChanging, setPauseChanging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(null);
   const [imagePreviewUrls, setImagePreviewUrls] = useState({});
@@ -697,6 +702,8 @@ export default function ResearchAssistant({ platformContext }) {
     content = content.trim();
     if (!content || sending || !activeSessionId) return;
     setSending(true);
+    setPaused(false);
+    setCanPause(false);
     setProgress("正在提交问题");
     setNotice("");
     if (!clarificationAction) setDraft("");
@@ -760,6 +767,8 @@ export default function ResearchAssistant({ platformContext }) {
               : item));
           } else if (parsed.event === "status") {
             if (parsed.data.task_id) activeAiTaskIdRef.current = parsed.data.task_id;
+            if (parsed.data.label === "AI 任务已取得执行槽") setCanPause(true);
+            if (typeof parsed.data.paused === "boolean") setPaused(parsed.data.paused);
             setProgress(parsed.data.label || "正在处理");
           } else if (parsed.event === "token") {
             setMessages((items) => items.map((item) => item.id === assistantEntry.id
@@ -805,6 +814,8 @@ export default function ResearchAssistant({ platformContext }) {
       activeAiTaskIdRef.current = "";
       activeAiAbortRef.current = null;
       setSending(false);
+      setPaused(false);
+      setCanPause(false);
       setProgress("");
     }
   }
@@ -827,6 +838,29 @@ export default function ResearchAssistant({ platformContext }) {
     }
     activeAiAbortRef.current?.abort();
     setNotice("已请求取消当前 AI 任务；未完成内容不会保存为最终结果。");
+  }
+
+  async function togglePause() {
+    const taskId = activeAiTaskIdRef.current;
+    if (!taskId || pauseChanging) return;
+    setPauseChanging(true);
+    try {
+      const action = paused ? "resume" : "pause";
+      const response = await authorizedFetch(`/api/ai/tasks/${taskId}/${action}`, { method: "POST" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || "无法切换任务状态。");
+      }
+      const task = await response.json();
+      const isPaused = task.status === "paused";
+      setPaused(isPaused);
+      setProgress(isPaused ? "当前任务已暂停" : "正在继续执行当前任务");
+      setNotice("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "切换任务状态失败。");
+    } finally {
+      setPauseChanging(false);
+    }
   }
 
   function sendOnEnter(event) {
@@ -946,9 +980,9 @@ export default function ResearchAssistant({ platformContext }) {
             <input ref={fileInputRef} hidden type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.pptx,.txt,.md,.markdown,.html,.htm,.csv,.json,.xml,.png,.jpg,.jpeg,.webp" onChange={uploadFileInput} />
             <button className="icon-button" type="button" title="上传、粘贴或拖入当前会话附件（单个不超过 10 MB）" onClick={() => fileInputRef.current?.click()} disabled={uploading}><Paperclip size={18} /></button>
             <label className="knowledge-scope-select">知识库<select value={knowledgeScope} onChange={(event) => setKnowledgeScope(event.target.value)}><option value="both">我的 + 公共</option><option value="private">仅我的</option><option value="public">仅公共</option></select></label>
-            <span>{uploading ? "正在保存附件" : sending ? "模型正在生成，可继续编辑下一条问题或添加图片；当前问题完成后再发送" : businessPolicy?.shared_business_external_analysis_approved ? "共享业务数据可用于已授权模型分析；私人附件需本地模型；Enter 发送，Shift + Enter 换行" : "外部模型仅接收公开或脱敏文本；私人附件需切换本地 vLLM；按 Enter 发送，Shift + Enter 换行"}</span>
+            <span>{uploading ? "正在保存附件" : sending ? paused ? "当前任务已暂停；点击继续将接着处理同一任务，不会重新发送问题" : "模型正在生成，可继续编辑下一条问题或添加图片；当前问题完成后再发送" : businessPolicy?.shared_business_external_analysis_approved ? "共享业务数据可用于已授权模型分析；私人附件需本地模型；Enter 发送，Shift + Enter 换行" : "外部模型仅接收公开或脱敏文本；私人附件需切换本地 vLLM；按 Enter 发送，Shift + Enter 换行"}</span>
             {sending
-              ? <button className="secondary-button send-button" type="button" onClick={cancelGeneration}><Square size={15} />停止</button>
+              ? <><button className="secondary-button send-button" type="button" onClick={togglePause} disabled={!canPause || pauseChanging}>{paused ? <Play size={15} /> : <Pause size={15} />}{paused ? "继续" : "暂停"}</button><button className="secondary-button send-button" type="button" onClick={cancelGeneration}><Square size={15} />停止</button></>
               : <button className="primary-button send-button" type="submit" disabled={!draft.trim() || uploading}><SendHorizontal size={17} />发送</button>}
           </div>
         </form>

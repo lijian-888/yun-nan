@@ -234,6 +234,7 @@ AI_TASK_QUEUE_WAIT_SECONDS = max(30, int(os.getenv("AI_TASK_QUEUE_WAIT_SECONDS",
 AI_TASK_MAX_ATTEMPTS = min(3, max(1, int(os.getenv("AI_TASK_MAX_ATTEMPTS", "2"))))
 AI_TASK_GATE = AIGatewayConcurrencyGate(AI_GATEWAY_CONCURRENCY)
 AI_TASK_CANCEL_EVENTS: dict[str, asyncio.Event] = {}
+AI_TASK_RESUME_EVENTS: dict[str, asyncio.Event] = {}
 AI_TASK_RUNNING_COROUTINES: dict[str, asyncio.Task[Any]] = {}
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
@@ -932,7 +933,7 @@ def _record_ai_audit(
 def _fail_interrupted_ai_tasks(db: Session) -> int:
     """Make pre-restart outcomes explicit instead of leaving phantom work."""
     interrupted = db.scalars(select(AIGatewayTask).where(
-        AIGatewayTask.status.in_(("queued", "running")),
+        AIGatewayTask.status.in_(("queued", "running", "paused")),
     )).all()
     now = datetime.now(timezone.utc)
     for task in interrupted:
@@ -972,6 +973,9 @@ def _update_ai_task(
         if not task:
             return
         now = datetime.now(timezone.utc)
+        if status == "running" and task.status == "paused":
+            # A stage transition must not undo an explicit user pause.
+            status = None
         if status:
             task.status = status
             if status == "running" and task.started_at is None:
@@ -988,7 +992,7 @@ def _update_ai_task(
             task.result_payload = result_payload
         task.updated_at = now
         if action:
-            _record_ai_audit(db, task, action, status, metadata)
+            _record_ai_audit(db, task, action, status or task.status, metadata)
         db.commit()
 
 
@@ -1030,6 +1034,11 @@ async def _admit_ai_task(task_id: str) -> None:
         AI_TASK_GATE.release(task_id)
         raise
     AI_TASK_CANCEL_EVENTS[task_id] = asyncio.Event()
+    resume_event = AI_TASK_RESUME_EVENTS.setdefault(task_id, asyncio.Event())
+    if (_load_ai_task(task_id) or task_snapshot).status == "paused":
+        resume_event.clear()
+    else:
+        resume_event.set()
     current = asyncio.current_task()
     if current:
         AI_TASK_RUNNING_COROUTINES[task_id] = current
@@ -1037,8 +1046,31 @@ async def _admit_ai_task(task_id: str) -> None:
 
 def _release_ai_task(task_id: str) -> None:
     AI_TASK_CANCEL_EVENTS.pop(task_id, None)
+    AI_TASK_RESUME_EVENTS.pop(task_id, None)
     AI_TASK_RUNNING_COROUTINES.pop(task_id, None)
     AI_TASK_GATE.release(task_id)
+
+
+async def _ai_pause_events(task_id: str) -> AsyncGenerator[str, None]:
+    """Hold the same SSE turn at a checkpoint; keep the connection alive."""
+    announced = False
+    while True:
+        _raise_if_ai_task_cancelled(task_id)
+        task = _load_ai_task(task_id)
+        if not task or task.status != "paused":
+            if announced:
+                yield sse_event("status", {"label": "已继续执行当前任务", "task_id": task_id, "paused": False})
+            return
+        if not announced:
+            announced = True
+            yield sse_event("status", {"label": "当前任务已暂停", "task_id": task_id, "paused": True})
+        wake = AI_TASK_RESUME_EVENTS.setdefault(task_id, asyncio.Event())
+        wake.clear()
+        try:
+            await asyncio.wait_for(wake.wait(), timeout=10)
+        except TimeoutError:
+            # A proxy must not mistake a paused turn for a dead connection.
+            yield ": paused\n\n"
 
 
 def _raise_if_ai_task_cancelled(task_id: str) -> None:
@@ -1079,12 +1111,18 @@ async def _stream_ai_with_resilience(
     while True:
         rendered_token = False
         try:
-            async with asyncio.timeout(timeout_seconds):
+            # Only count active producer time. The consumer may deliberately
+            # suspend at a pause checkpoint after a yielded token.
+            async with asyncio.timeout(None) as deadline:
+                deadline.reschedule(asyncio.get_running_loop().time() + timeout_seconds)
                 async for result in stream_factory():
                     _raise_if_ai_task_cancelled(task_id)
                     if result.get("type") == "token" and result.get("text"):
                         rendered_token = True
+                    remaining = max(0, (deadline.when() or 0) - asyncio.get_running_loop().time())
+                    deadline.reschedule(None)
                     yield result
+                    deadline.reschedule(asyncio.get_running_loop().time() + remaining)
             return
         except asyncio.CancelledError:
             raise
@@ -6787,7 +6825,7 @@ def get_ai_task_status(
 
 
 @app.post("/api/ai/tasks/{task_id}/cancel")
-def cancel_ai_task(
+async def cancel_ai_task(
     task_id: str,
     user: CurrentUser = Depends(require_business_user),
     session: Session = Depends(get_business_project_session),
@@ -6812,9 +6850,59 @@ def cancel_ai_task(
     cancel_event = AI_TASK_CANCEL_EVENTS.get(task_id)
     if cancel_event:
         cancel_event.set()
+    resume_event = AI_TASK_RESUME_EVENTS.get(task_id)
+    if resume_event:
+        resume_event.set()
     running = AI_TASK_RUNNING_COROUTINES.get(task_id)
     if running and not running.done():
         running.cancel()
+    return _serialize_ai_task(task)
+
+
+@app.post("/api/ai/tasks/{task_id}/pause")
+async def pause_ai_task(
+    task_id: str,
+    user: CurrentUser = Depends(require_business_user),
+    session: Session = Depends(get_business_project_session),
+) -> dict[str, Any]:
+    account = sync_platform_account(session, user)
+    task = session.scalar(select(AIGatewayTask).where(AIGatewayTask.id == task_id).with_for_update())
+    if not task or task.institution_id != account.institution_id or task.owner_id != user.id:
+        raise HTTPException(404, "未找到该 AI 任务。")
+    if task.status == "paused":
+        return _serialize_ai_task(task)
+    if task.status != "running" or task.task_type != "research_chat":
+        raise HTTPException(409, "只有正在执行的对话任务可以暂停。")
+    task.status = "paused"
+    task.updated_at = datetime.now(timezone.utc)
+    _record_ai_audit(session, task, "paused", "paused", {"requested_by": user.id})
+    session.commit()
+    wake = AI_TASK_RESUME_EVENTS.setdefault(task_id, asyncio.Event())
+    wake.clear()
+    return _serialize_ai_task(task)
+
+
+@app.post("/api/ai/tasks/{task_id}/resume")
+async def resume_ai_task(
+    task_id: str,
+    user: CurrentUser = Depends(require_business_user),
+    session: Session = Depends(get_business_project_session),
+) -> dict[str, Any]:
+    account = sync_platform_account(session, user)
+    task = session.scalar(select(AIGatewayTask).where(AIGatewayTask.id == task_id).with_for_update())
+    if not task or task.institution_id != account.institution_id or task.owner_id != user.id:
+        raise HTTPException(404, "未找到该 AI 任务。")
+    if task.status == "running":
+        return _serialize_ai_task(task)
+    if task.status != "paused" or task.task_type != "research_chat":
+        raise HTTPException(409, "当前任务不处于暂停状态，无法继续。")
+    if task_id not in AI_TASK_RUNNING_COROUTINES:
+        raise HTTPException(409, "任务执行连接已中断，无法从内存检查点继续；请刷新查看任务结果。")
+    task.status = "running"
+    task.updated_at = datetime.now(timezone.utc)
+    _record_ai_audit(session, task, "resumed", "running", {"requested_by": user.id})
+    session.commit()
+    AI_TASK_RESUME_EVENTS.setdefault(task_id, asyncio.Event()).set()
     return _serialize_ai_task(task)
 
 
@@ -6858,7 +6946,7 @@ async def research_chat_stream(
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-    if existing_task and existing_task.status in {"queued", "running"}:
+    if existing_task and existing_task.status in {"queued", "running", "paused"}:
         raise HTTPException(409, f"相同幂等键对应的 AI 任务仍为 {existing_task.status}，不会重复创建任务。")
     # Order conversation turns across tabs while we inspect the latest message
     # and persist either a clarification or a model request.
@@ -6868,7 +6956,7 @@ async def research_chat_stream(
     active_turn = session.scalar(select(AIGatewayTask.id).where(
         AIGatewayTask.session_id == research_session_id,
         AIGatewayTask.owner_id == user.id,
-        AIGatewayTask.status.in_(["queued", "running"]),
+        AIGatewayTask.status.in_(["queued", "running", "paused"]),
     ).limit(1))
     if active_turn:
         raise HTTPException(409, "当前会话上一轮仍在处理中，请等待完成或取消后再发送，避免上下文错序。")
@@ -7321,6 +7409,8 @@ async def research_chat_stream(
             })
             await _admit_ai_task(ai_task_id)
             slot_acquired = True
+            async for pause_event in _ai_pause_events(ai_task_id):
+                yield pause_event
             yield sse_event("status", {
                 "label": "AI 任务已取得执行槽",
                 "task_id": ai_task_id,
@@ -7330,6 +7420,8 @@ async def research_chat_stream(
             dialogue_plan = await plan_dialogue(provider=selected_provider, question=safe_user_prompt,
                                                 history=safe_conversation_history)
             _raise_if_ai_task_cancelled(ai_task_id)
+            async for pause_event in _ai_pause_events(ai_task_id):
+                yield pause_event
             _update_ai_task(ai_task_id, status="running", action="dialogue_planned",
                             metadata=dialogue_plan.model_dump())
             yield sse_event("status", {"label": {"capabilities": "正在核对数据来源与可用功能",
@@ -7354,6 +7446,8 @@ async def research_chat_stream(
                     clarification_attempt=clarification_attempt,
                     skipped=payload.clarification_action == "skip",
                 )
+            async for pause_event in _ai_pause_events(ai_task_id):
+                yield pause_event
             safe_dialogue = prepare_egress([dialogue_context], provider=selected_provider)
             analysis_run_id = _trial_analysis_run_id_from_context(dialogue_context)
             evidence = [*static_evidence, *dialogue_cards]
@@ -7370,6 +7464,8 @@ async def research_chat_stream(
                 search_query=dialogue_plan.web_query,
                 provider=selected_provider,
             ) if dialogue_plan.needs_web or needs_current_public_search(public_request) or page_read else ([], None))
+            async for pause_event in _ai_pause_events(ai_task_id):
+                yield pause_event
             public_web_context = build_public_web_context(web_results, search_note, question=public_request,
                 research_question=dialogue_plan.web_question, search_query=dialogue_plan.web_query)
             try:
@@ -7413,6 +7509,8 @@ async def research_chat_stream(
             if memory_was_compacted and len((memory_state or {}).get("content") or []) <= 8:
                 yield sse_event("status", {"label": "正在自动压缩上下文"})
                 await asyncio.sleep(0.12)
+            async for pause_event in _ai_pause_events(ai_task_id):
+                yield pause_event
             yield sse_event("status", {"label": "正在调用大模型"})
             async for result in _stream_ai_with_resilience(
                 ai_task_id,
@@ -7431,6 +7529,8 @@ async def research_chat_stream(
                     response_guidance=dialogue_response_guidance(dialogue_plan),
                 ),
             ):
+                async for pause_event in _ai_pause_events(ai_task_id):
+                    yield pause_event
                 if result["type"] == "gateway_retry":
                     yield sse_event("status", {
                         "label": f"上游调用未完成，正在进行第 {result['attempt']} 次受控重试",
@@ -7455,6 +7555,8 @@ async def research_chat_stream(
                         (state for state in dialogue_states if state.get("state") == "numeric_fact_scope"), None))
                 elif dialogue_plan.intent == "database":
                     result["content"] = polish_business_answer(result["content"], payload.content.strip())
+                async for pause_event in _ai_pause_events(ai_task_id):
+                    yield pause_event
                 with SessionLocal() as write_session:
                     _set_research_owner(write_session, user.id)
                     _set_active_project(write_session, research_session.project_id)
