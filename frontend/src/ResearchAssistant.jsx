@@ -880,7 +880,7 @@ export default function ResearchAssistant({ platformContext }) {
       {workspace === "assistant" ? <>
       <div className="chat-pane">
       <section className="chat-log" ref={chatLogRef} onScroll={handleChatScroll}>
-        {!messages.length && <div className="chat-empty"><Bot size={28} /><h2>有什么可以帮你？</h2><p>可以查询已有水稻品种资料，也可以讨论科研知识、分析方法或整理研究思路。涉及具体数据时，会核对来源；确实需要补充条件时再向你提问。</p><div className="trial-prompt-list" aria-label="对话示例问题"><span>试着问问</span>{["你有国家水稻数据中心的数据吗？", "D优130的直链淀粉含量是多少？", "如何评价一个品种的稳产性？"].map((prompt) => <button type="button" key={prompt} onClick={() => applyTrialAnalysisPrompt(prompt)}>{prompt}</button>)}</div></div>}
+        {!messages.length && <div className="chat-empty"><Bot size={28} /><h2>有什么可以帮你？</h2><p>可以查询已有水稻品种资料、检索公开文献、尝试阅读公开网页，也可以讨论科研方法。涉及具体数据时，会核对来源；确实需要补充条件时再向你提问。</p><div className="trial-prompt-list" aria-label="对话示例问题"><span>试着问问</span>{["D优130的直链淀粉含量是多少？", "检索近五年水稻耐盐育种的公开文献，并附来源链接", "如何评价一个品种的稳产性？"].map((prompt) => <button type="button" key={prompt} onClick={() => applyTrialAnalysisPrompt(prompt)}>{prompt}</button>)}</div></div>}
         {messages.map((message) => {
           const content = message.content || (message.streaming ? progress || "正在准备问题…" : "");
           const messageAttachments = (message.evidence || []).filter((item) => item.type === "message_attachment");
