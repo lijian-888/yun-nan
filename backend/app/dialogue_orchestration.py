@@ -66,6 +66,9 @@ web_query不得包含私人附件、院内未公开记录、凭据或整段历�
 
 
 _MEASUREMENT = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*(%|％|厘米|cm|毫米|mm|天|粒|公斤|千克|kg|克|g)(?![A-Za-z])", re.I)
+_MEASUREMENT_RANGE = re.compile(
+    r"(?<![\d.])(\d+(?:\.\d+)?)\s*[～~—-]\s*(\d+(?:\.\d+)?)\s*"
+    r"(%|％|厘米|cm|毫米|mm|天|粒|公斤|千克|kg|克|g)(?![A-Za-z])", re.I)
 _UNITS = {"％": "%", "厘米": "cm", "毫米": "mm", "公斤": "kg", "千克": "kg", "克": "g"}
 
 
@@ -76,8 +79,11 @@ def validate_fact_measurements(answer: str, evidence: str) -> None:
     provenance or a full factual-entailment evaluation.
     """
     def values(content):
-        return {(Decimal(number), _UNITS.get(unit.lower(), unit.lower()))
-                for number, unit in _MEASUREMENT.findall(content)}
+        found = {(Decimal(number), _UNITS.get(unit.lower(), unit.lower()))
+                 for number, unit in _MEASUREMENT.findall(content)}
+        found.update((Decimal(start), _UNITS.get(unit.lower(), unit.lower()))
+                     for start, _, unit in _MEASUREMENT_RANGE.findall(content))
+        return found
     if values(answer) - values(evidence):
         raise ResearchAgentError("模型回答出现无查询证据支持的指标数值，本轮未展示或保存回答，请重试。")
 

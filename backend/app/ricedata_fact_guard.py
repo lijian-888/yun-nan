@@ -52,10 +52,16 @@ def validate_scoped_fact_answer(answer: str, scope: dict | None) -> None:
     for item in scope.get("bindings") or []:
         for value in _values(str(item.get("value") or "")):
             bindings.append((value, item))
+    bound_units = {value[1] for value, _ in bindings}
     if bindings and not _MEASURE.search(answer):
         raise ResearchAgentError("模型未回答已查到的指标数值，本轮未展示或保存回答，请重试。")
     for match in _MEASURE.finditer(answer):
         value = (Decimal(match.group(1)), _UNIT.get(match.group(2).lower(), match.group(2).lower()))
+        # The generic evidence guard has already checked all numbers. This
+        # scoped guard only owns the queried metric's unit: a sourced relative
+        # yield change in % must not invalidate a kg/mu yield answer.
+        if bindings and value[1] not in bound_units:
+            continue
         candidates = [item for candidate_value, item in bindings if candidate_value == value]
         if not candidates:
             raise ResearchAgentError("模型回答中的指标数值未绑定到本轮所查审定记录，本轮未展示或保存回答，请重试。")
@@ -87,7 +93,9 @@ def validate_scoped_fact_answer(answer: str, scope: dict | None) -> None:
                     for alias in _REGIONS[region])
                 for region in regions)]
         years = set(_YEAR.findall(compact))
-        if years and (regions or "审定" in compact or "省定" in compact) and "试验" not in compact and "检测" not in compact:
+        if years and (regions or "审定" in compact or "省定" in compact) and not any(
+            token in compact for token in ("试验", "区试", "续试", "检测")
+        ):
             candidates = [item for item in candidates
                           if str(approvals[item["approval_id"]].get("approval_year")) in years]
         named_approval = [row["approval_no"] for row in approvals.values()

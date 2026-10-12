@@ -61,6 +61,7 @@ class DialoguePlannerTests(unittest.TestCase):
     def test_preserve_verified_measurements_and_units(self):
         validate_fact_measurements("直链淀粉含量24.10%，株高102.7厘米。", "24.1% 102.7cm")
         validate_fact_measurements("这条审定没有收录该指标。", "未找到该指标")
+        validate_fact_measurements("结实率78.7%～85.1%。", "结实率78.7～85.1%。")
 
     def test_invented_or_borrowed_measurement_is_rejected(self):
         for answer, evidence in (("24.1%", "四川审定未收录"), ("株高105厘米", "株高102.7cm"),

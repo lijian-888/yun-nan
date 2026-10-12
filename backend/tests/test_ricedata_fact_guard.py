@@ -55,6 +55,22 @@ class ScopedFactGuardTests(unittest.TestCase):
     def test_no_scope_keeps_general_answers_unaffected(self):
         validate_scoped_fact_answer("品种比较应考虑多点试验。", None)
 
+    def test_yield_scope_accepts_sourced_relative_change_but_not_wrong_yield(self):
+        yield_scope = {"state": "numeric_fact_scope", "variety_id": 6383,
+                       "approvals": [{"approval_id": 47765, "approval_year": 2006,
+                                      "approval_region": "福建", "approval_no": "闽审稻2006008"}],
+                       "bindings": [{"approval_id": 47765, "trait_code": "yield_kg_per_mu",
+                                     "value": "584.44公斤/亩", "status": "confirmed"}]}
+        validate_scoped_fact_answer(
+            "D优130（闽审稻2006008）在福建2003年区试平均亩产584.44公斤/亩，较对照增产4.93%。",
+            yield_scope,
+        )
+        with self.assertRaises(ResearchAgentError):
+            validate_scoped_fact_answer(
+                "D优130（闽审稻2006008）在福建2003年区试平均亩产528.73公斤/亩，增产4.93%。",
+                yield_scope,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

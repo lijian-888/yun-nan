@@ -54,6 +54,40 @@ def _approval_label(approval: dict) -> str:
     return " · ".join(parts)
 
 
+def _measurement_section(raw: str | None, fact: dict, spec: Any,
+                         approval_region: str | None) -> str:
+    """Return only an explicit section heading preceding this exact measurement.
+
+    Some approvals contain several ecological-zone measurements in one text
+    field. A clipped source sentence alone can omit its heading. Never infer
+    a zone from the approval's province or the numeric value itself.
+    """
+    excerpt = str(fact.get("source_text") or "")
+    if not raw or not excerpt or fact.get("value_numeric") is None:
+        return ""
+    excerpt_at = raw.find(excerpt)
+    if excerpt_at < 0:
+        return ""
+    number = _number(fact["value_numeric"])
+    target = None
+    for alias in sorted(spec.aliases, key=len, reverse=True):
+        pattern = re.compile(re.escape(alias) + r"[^\d]{0,18}" + re.escape(number) +
+                             r"(?:\.0+)?(?![\d.])")
+        target = pattern.search(excerpt)
+        if target:
+            break
+    if not target:
+        return ""
+    prefix = raw[:excerpt_at + target.start()]
+    headings = [(match.start(), match.group(1).strip()) for match in re.finditer(
+        r"(?:^|[。；;\n])\s*\d+[、．.]\s*([^：:\n。]{2,35})[：:]", prefix)]
+    if approval_region:
+        headings.extend((match.start(), match.group(1).strip()) for match in re.finditer(
+            r"[（(]([^（）()]{2,14})[）)]", prefix)
+            if match.group(1).strip() in approval_region)
+    return max(headings)[1] if headings else ""
+
+
 def _find_varieties(session: Session, question: str) -> list[dict]:
     return resolve_varieties(session, question)
 
@@ -267,7 +301,7 @@ def lookup_numeric_trait(
     spec = specs[0] if specs else TRAIT_BY_CODE.get(context["trait_code"]) if context else None
     if not spec:
         return None
-    varieties = [] if followup and not specs else _find_varieties(session, question)
+    varieties = _find_varieties(session, question)
     explicit_variety = bool(varieties)
     if not varieties and context and not has_explicit_subject(question):
         varieties = _rows(session, """
@@ -278,10 +312,9 @@ def lookup_numeric_trait(
         return _outcome(f"未找到问题中的品种，无法查询“{spec.name}”。请提供完整品种名或国家水稻数据中心品种链接。",
                         context={"state": "local_query_reset", "reason": "subject_not_found"})
     if len(varieties) > 1:
-        shown = varieties[:20]
-        return _outcome("检测到多个同名品种，请用来源页面或品种编号确认查询对象：" +
-                        "；".join(f"{v['variety_name']}（{v['source_variety_id']}）" for v in shown) +
-                        (f"。共{len(varieties)}条同名记录，仅列前20条；请提供原始页面链接。" if len(varieties) > 20 else ""),
+        return _outcome(f"数据库中有{len(varieties)}条同名品种记录，不能只凭名称确定要查哪一条。"
+                        "请提供国家水稻数据中心的具体品种详情页链接，"
+                        "或补充育种单位、亲本来源等可辨认信息；确认后再查询指标。",
                         context={"state": "local_query_reset", "reason": "multiple_subjects"})
     variety = varieties[0]
     approvals = _rows(session, """
@@ -386,11 +419,11 @@ def lookup_numeric_trait(
             """, {"approval_id": approval["approval_id"]})
             candidates = extract_yield_candidates(original[0].get("yield_performance_text") if original else None)
             if candidates:
-                rows = [[item["literal"]] for item in candidates[:12]]
+                rows = [[item["literal"], item["excerpt"]] for item in candidates[:12]]
                 return _outcome(
                     f"**{variety['variety_name']} · {label}**：尚无已结构化核对的亩产值；"
                     "原文中找到以下候选值，单位按原文保留，均待核对，不作为确认结果：\n\n" +
-                    table(["原文候选值（待核对）"], rows) +
+                    table(["原文候选值（待核对）", "对应试验原文"], rows) +
                     ("\n\n候选超过12处，请查看原始页面继续核对。" if len(candidates) > 12 else "") +
                     "\n\n不能合并不同试验年份或直接取平均；对应原文请展开下方来源证据核对。",
                     evidence=[{"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · 亩产原文",
@@ -509,6 +542,13 @@ def lookup_numeric_trait(
     lines: list[str] = []
     evidence: list[dict] = []
     original_sections = []
+    characteristics = None
+    if len(facts) > 1:
+        characteristics = session.scalar(text("""
+            SELECT characteristics_raw_text
+            FROM agent_query.ricedata__rice_variety_trait_summary
+            WHERE approval_id = :approval_id LIMIT 1
+        """), {"approval_id": approval["approval_id"]})
     for fact in facts:
         when = f"（{fact['observation_year']}年检测）" if fact.get("observation_year") else ""
         value = display_value({**fact, "trait_code": spec.code, "unit": fact.get("unit") or spec.unit})
@@ -516,8 +556,9 @@ def lookup_numeric_trait(
                         "suitable_area_text": "适宜地区", "approval_opinion_text": "审定意见",
                         "variety_source_text": "品种来源"}.get(fact.get("source_field"), "特征特性")
         excerpt = str(fact.get("source_text") or "").strip()
+        section = _measurement_section(characteristics, fact, spec, approval.get("approval_region"))
         raw_note = "（按原文读取，待核对）" if fact.get("from_raw") else ""
-        lines.append(f"- **{value}**{when}，依据：{source_field}{raw_note}。")
+        lines.append(f"- **{value}**{when}{f'（{section}）' if section else ''}，依据：{source_field}{raw_note}。")
         original_sections.append((source_field + "原文", excerpt))
     evidence.append({"type": "ricedata_trait", "title": f"{variety['variety_name']} · {label} · {spec.name}",
                      "detail": "以下原文对应本条审定记录，可用于核对数值及其限定条件。",

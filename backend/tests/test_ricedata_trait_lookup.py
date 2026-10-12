@@ -83,14 +83,44 @@ class ApprovalLookupIntegrationTests(unittest.TestCase):
             self.assertIn("556.6", result["content"])
             self.assertIn("568.9", result["content"])
             self.assertIn("待核对", result["content"])
+            self.assertIn("区试", result["content"])
+            self.assertIn("生产试验", result["content"])
             self.assertNotIn("已确认亩产", result["content"])
 
-    def test_all_exact_name_collisions_are_presented(self):
+    def test_full_subregion_followup_keeps_pending_variety_and_trait(self):
+        with Session(self.engine) as session:
+            first = lookup_numeric_trait(session, "T优300的直链淀粉含量是多少？")
+            previous = SimpleNamespace(role="assistant", content=first["content"],
+                                       operation_state=[first["context"], first["pending"]])
+            second = lookup_numeric_trait(session, "2012年云南普洱、文山", [previous])
+            self.assertIn("21.2%", second["content"])
+            self.assertNotIn("未找到问题中的品种", second["content"])
+
+    def test_unknown_new_variety_in_followup_does_not_inherit_old_one(self):
+        with Session(self.engine) as session:
+            first = lookup_numeric_trait(session, "T优300的直链淀粉含量是多少？")
+            previous = SimpleNamespace(role="assistant", content=first["content"],
+                                       operation_state=[first["context"], first["pending"]])
+            second = lookup_numeric_trait(session, "那明珠999号2012年云南的直链淀粉含量是多少？", [previous])
+            self.assertIn("未找到问题中的品种", second["content"])
+            self.assertNotIn("21.2%", second["content"])
+
+    def test_multiple_values_keep_their_ecological_sections(self):
+        with Session(self.engine) as session:
+            national = lookup_numeric_trait(session, "准两优527国审稻2005026的直链淀粉含量是多少？")
+            self.assertIn("21%**（长江中下游）", national["content"])
+            self.assertIn("22.2%**（武陵山区）", national["content"])
+            yunnan = lookup_numeric_trait(session, "T优300云南2012年的结实率是多少？")
+            self.assertIn("76.9%**（普洱）", yunnan["content"])
+            self.assertIn("78.8%**（文山）", yunnan["content"])
+
+    def test_all_exact_name_collisions_ask_without_internal_ids(self):
         with Session(self.engine) as session:
             result = lookup_numeric_trait(session, "R18的株高是多少？")
-            self.assertIn("607864", result["content"])
-            self.assertIn("627667", result["content"])
-            self.assertEqual(result["content"].count("（"), 9)
+            self.assertIn("9条同名", result["content"])
+            self.assertIn("品种详情页链接", result["content"])
+            self.assertNotIn("607864", result["content"])
+            self.assertNotIn("627667", result["content"])
 
     def test_page_record_is_not_labelled_as_formal_approval(self):
         with Session(self.engine) as session:
