@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Search, X, LoaderCircle, Download, Plus } from "lucide-react";
@@ -22,6 +22,9 @@ export default function VarietySearchWorkspace() {
   const searchController = useRef(null);
   const detailController = useRef(null);
   const dialog = useRef(null);
+  const detailBody = useRef(null);
+  const backdropPressed = useRef(false);
+  const detailTitleId = useId();
   const currentDetail = useRef(null);
   const national = draft.source === "ricedata";
   const patch = change => setDraft(value => ({ ...value, ...change }));
@@ -60,11 +63,18 @@ export default function VarietySearchWorkspace() {
     currentDetail.current = { source, id };
     setDetail(null); setDetailError(""); setDetailBusy(true);
     if (!dialog.current.open) dialog.current.showModal();
+    detailBody.current?.scrollTo({ top: 0, left: 0 });
     try {
       const response = await request(`/api/research/variety-search/${source}/${encodeURIComponent(id)}?page=${page}`, { signal: controller.signal });
       if (!controller.signal.aborted) setDetail(response);
     } catch (e) { if (!controller.signal.aborted) setDetailError(e.message); }
     finally { if (!controller.signal.aborted) setDetailBusy(false); }
+  }
+
+  function outsideDialog(event) {
+    if (event.target !== event.currentTarget) return false;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom;
   }
 
   function exportPage() {
@@ -95,8 +105,8 @@ export default function VarietySearchWorkspace() {
       <div className="vs-table-scroll"><table><thead><tr><th>名称 / 别名</th><th>{result.source === "ricedata" ? "品种类型" : "材料编号"}</th><th>亲本来源</th><th>{result.source === "ricedata" ? "育种单位" : "数据情况"}</th><th>{result.source === "ricedata" ? "符合条件的审定资料" : "记录地点 / 年份"}</th></tr></thead><tbody>{result.records.map(r => <tr key={r.id}><td><button type="button" className="vs-name" onClick={() => openDetail(result.source, r.id)}>{r.name}</button><small>{[...new Set(r.aliases || [])].filter(a => a !== r.name).join("、")}</small></td><td>{result.source === "ricedata" ? display(r.variety_type) : r.id}</td><td>{display(r.parentage)}</td><td>{result.source === "ricedata" ? display(r.breeder) : <>{r.has_phenotype ? "有表型" : "无表型记录"} · {r.has_genotype ? "有基因型" : "无基因型记录"}{r.needs_review && <small className="vs-warning">材料身份待复核</small>}</>}</td><td>{result.source === "ricedata" ? <>{display(r.regions)}<small>{r.approval_count ? `${r.approval_count} 条 · 最近 ${r.latest_year || "年份未记载"}` : "暂无正式审定记录"}</small></> : <>{display(r.locations)}<small>{r.earliest_year || "—"} 至 {r.latest_year || "—"}</small></>}</td></tr>)}{!result.records.length && <tr><td colSpan={5}>未找到符合这些条件的记录。可减少条件或改用别名检索；未命中不等于原始资料不存在。</td></tr>}</tbody></table></div>
       <div className="vs-pagination"><button className="secondary-button" type="button" disabled={result.page <= 1 || busy} onClick={() => search({ ...result.query, page: result.page - 1 })}>上一页</button><span>本页 {result.records.length} 条 / 共 {result.total.toLocaleString()} 条</span><button className="secondary-button" type="button" disabled={!result.has_more || busy} onClick={() => search({ ...result.query, page: result.page + 1 })}>下一页</button></div>
     </section>}
-    <dialog ref={dialog} className="vs-detail" onClose={() => detailController.current?.abort()}><div className="vs-detail-heading"><h2>{detail?.record.name || "品种 / 材料详情"}</h2><button className="secondary-button" type="button" aria-label="关闭详情" onClick={() => dialog.current.close()}><X size={18} /></button></div>{detailBusy && <p role="status">正在读取详细资料…</p>}{detailError && <p className="vs-error" role="alert">{detailError}</p>}{detail && <>
+    <dialog ref={dialog} className="vs-detail" aria-labelledby={detailTitleId} onClose={() => { detailController.current?.abort(); backdropPressed.current = false; }} onPointerDown={e => { backdropPressed.current = outsideDialog(e); }} onClick={e => { if (backdropPressed.current && outsideDialog(e)) dialog.current.close(); backdropPressed.current = false; }}><div className="vs-detail-heading"><h2 id={detailTitleId}>{detail?.record.name || "品种 / 材料详情"}</h2><button className="secondary-button" type="button" aria-label="关闭详情" onClick={() => dialog.current.close()}><X size={18} /></button></div><div className="vs-detail-body" ref={detailBody} tabIndex={0} role="region" aria-label="详细资料，可滚动">{detailBusy && <p role="status">正在读取详细资料…</p>}{detailError && <p className="vs-error" role="alert">{detailError}</p>}{detail && <>
       {detail.source === "ricedata" ? <><div className="assistant-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ table: ({ children }) => <div className="vs-table-scroll"><table>{children}</table></div>, a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{detail.content}</ReactMarkdown></div>{detail.evidence?.length > 0 && <details><summary>原文依据与来源</summary>{detail.evidence.map((e, i) => <div key={i}><strong>{e.title || e.name || `来源 ${i + 1}`}</strong>{e.url && <a href={e.url} target="_blank" rel="noreferrer">查看原始资料</a>}<p>{e.detail}</p>{(e.excerpts || []).map((excerpt, index) => <section key={index}><h4>{excerpt.title}</h4><p>{excerpt.text}</p></section>)}</div>)}</details>}</> : <><p>材料编号：{detail.record.id} · 别名：{display(detail.record.aliases)}</p><p>亲本来源：{display(detail.record.parentage)}</p>{detail.record.needs_review && <p className="vs-warning">该材料身份仍待复核，观测记录仅供核对，不宜作为已确认材料直接用于评价。</p>}<h3>表型观测 · {detail.observation_total.toLocaleString()} 条</h3><p>各次观测分别列出，不将不同年份、地点的数据合成单一数值。</p><div className="vs-table-scroll"><table><thead><tr><th>性状</th><th>观测值</th><th>单位</th><th>年份 / 地点</th><th>原始记录</th></tr></thead><tbody>{detail.observations.map((o, i) => <tr key={i}><td>{o.raw_header || "未记载性状名称"}</td><td>{o.value_numeric ?? o.value_text ?? o.raw_value ?? "—"}</td><td>{display(o.unit)}</td><td>{o.trial_year || "—"} / {display(o.observation_location)}</td><td><details><summary>查看溯源</summary><p>来源编号：{display(o.source_file_id)}<br />工作表：{display(o.sheet_name)}<br />行号：{display(o.row_number)}<br />原始值：{display(o.raw_value)}<br />质量状态：{display(o.quality_label)}</p></details></td></tr>)}{!detail.observations.length && <tr><td colSpan={5}>暂无该材料的表型观测记录。</td></tr>}</tbody></table></div><div className="vs-pagination"><button className="secondary-button" disabled={detail.observation_page <= 1} onClick={() => openDetail(currentDetail.current.source, currentDetail.current.id, detail.observation_page - 1)}>上一页</button><span>第 {detail.observation_page} 页 · 每页最多 50 条</span><button className="secondary-button" disabled={!detail.observation_has_more} onClick={() => openDetail(currentDetail.current.source, currentDetail.current.id, detail.observation_page + 1)}>下一页</button></div></>}
-    </>}</dialog>
+    </>}</div><footer className="vs-detail-footer"><span>按 Esc 或点击窗口外可关闭</span><button className="secondary-button" type="button" onClick={() => dialog.current.close()}>关闭窗口</button></footer></dialog>
   </section>;
 }

@@ -1,4 +1,4 @@
-.variety-search-workspace { background:#fff; border:1px solid #d1e4dc; border-radius:8px; padding:24px; color:#17463c; }
+.variety-search-workspace { flex:0 0 auto; min-width:0; background:#fff; border:1px solid #d1e4dc; border-radius:8px; padding:24px; color:#17463c; }
 .variety-search-workspace p { color:#64857b; font-size:13px; line-height:1.7; }
 .variety-search-workspace h2,.variety-search-workspace h3 { margin:0 0 8px; }
 .vs-sources { display:flex; gap:10px; flex-wrap:wrap; margin:20px 0; }
@@ -32,10 +32,16 @@
 .variety-search-workspace td { min-width:130px; max-width:300px; overflow-wrap:anywhere; }
 .variety-search-workspace td small { display:block; color:#66877b; margin-top:5px; }
 .vs-name { padding:0; border:0; color:#06745a; font-weight:600; text-align:left; text-decoration:underline; background:none; }
-.vs-detail { width:min(1080px,90vw); max-height:85vh; padding:24px; overflow:auto; border:1px solid #b3d2c3; border-radius:10px; color:#17463c; }
+.vs-detail { width:min(1080px,calc(100vw - 32px)); max-height:85vh; max-height:85dvh; padding:0; overflow:hidden; border:1px solid #b3d2c3; border-radius:10px; color:#17463c; }
+.vs-detail[open] { display:flex; flex-direction:column; }
 .vs-detail::backdrop { background:#06271f80; }
-.vs-detail-heading { margin-top:0; }
+.vs-detail-heading { flex:0 0 auto; margin:0; padding:16px 24px; border-bottom:1px solid #dce9e2; background:#fff; }
+.vs-detail-heading h2 { min-width:0; margin:0; overflow-wrap:anywhere; }
+.vs-detail-heading button { flex:none; }
+.vs-detail-body { min-height:0; flex:1 1 auto; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:20px 24px; }
+.vs-detail-footer { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 24px; border-top:1px solid #dce9e2; background:#f7faf8; }
+.vs-detail-footer span { color:#64857b; font-size:12px; }
 .vs-warning { color:#91600f!important; }
 .variety-search-workspace button { cursor:pointer; }
 .variety-search-workspace button:disabled { cursor:default; opacity:.5; }
-@media(max-width:760px) { .variety-search-workspace { padding:15px; } .vs-search-row,.vs-trait-row { flex-wrap:wrap; } .vs-search-row input { width:100%; } .vs-detail { padding:14px; } }
+@media(max-width:760px) { .variety-search-workspace { padding:15px; } .vs-search-row,.vs-trait-row { flex-wrap:wrap; } .vs-search-row input { width:100%; } .vs-detail-heading,.vs-detail-body,.vs-detail-footer { padding:14px; } .vs-detail-heading h2 { font-size:18px; } }

@@ -225,7 +225,7 @@ body:has(.research-shell), body:has(.assistant-loading), body:has(.auth-error) {
 /* Keep categories dense and make the structured query workspace use the available desktop canvas. */
 .knowledge-main .knowledge-folder-tree { align-content: start; gap: 3px; }
 .knowledge-main .knowledge-folder-row { min-height: 35px; }
-.research-main.structured-main { min-height: 100vh; padding: 22px clamp(22px, 2.5vw, 38px) 28px; background: #f8fbf9; }
+.research-main.structured-main { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 22px clamp(22px, 2.5vw, 38px) 28px; background: #f8fbf9; }
 .structured-main .research-topbar { padding-bottom: 12px; }
 .structured-main .structured-query-panel { flex: 0 0 auto; width: min(1440px, 100%); min-height: 0; margin: 0 auto 24px; }
 .structured-main .structured-query-heading { padding-top: 18px; padding-bottom: 14px; }
