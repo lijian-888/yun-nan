@@ -22,7 +22,7 @@ PUBLIC_TOPIC_TERMS = (
     "稻瘟病", "白叶枯病", "纹枯病", "病虫害", "抗病", "抗倒伏", "耐盐", "耐旱",
     "栽培", "施肥", "植保", "农业", "小麦", "玉米", "大豆", "论文", "文献", "研究进展",
 )
-SEARCH_TRIGGERS = ("最新", "近期", "近年", "论文", "文献", "研究进展", "研究成果", "公开资料", "公开信息", "检索", "搜索")
+SEARCH_TRIGGERS = ("最新", "最近", "近期", "近年", "论文", "文献", "研究进展", "研究成果", "公开资料", "公开信息", "检索", "搜索")
 TRUSTED_DOMAIN_SUFFIXES = (
     ".gov.cn", ".edu.cn", ".ac.cn", ".gov", ".edu", ".ac.uk",
     "ncbi.nlm.nih.gov", "doi.org", "nature.com", "springer.com",
@@ -293,9 +293,9 @@ async def _read_public_pages(urls: list[str], api_key: str) -> tuple[list[Public
     return results, "\n".join(notes) or None
 
 
-async def search_public_references(question: str) -> tuple[list[PublicSearchResult], str | None]:
+async def search_public_references(question: str, *, model_requested: bool = False) -> tuple[list[PublicSearchResult], str | None]:
     """At most one Search and one Extract call. No login/crawl or local HTTP fetch."""
-    if not needs_current_public_search(question):
+    if LOCAL_ONLY.search(question) or not (model_requested or needs_current_public_search(question)):
         return [], None
     api_key = os.getenv("TAVILY_API_KEY", "").strip()
     if not api_key:

@@ -153,7 +153,7 @@ from .ai_gateway import (
 )
 from .business_data_query import DataQuery, BusinessQueryError, load_business_catalog, execute_business_query, build_business_evidence
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
-from .research_search import build_public_web_context, requested_public_pages, resolve_public_request, search_public_references
+from .research_search import build_public_web_context, needs_current_public_search, requested_public_pages, resolve_public_request, search_public_references
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
 from .ricedata_trait_lookup import lookup_numeric_trait, variety_context_from_question
 from .research_clarification import clarification_for_question, expanded_question
@@ -7354,8 +7354,9 @@ async def research_chat_stream(
             public_request = resolve_public_request(safe_user_prompt, safe_conversation_history)
             page_read = bool(requested_public_pages(public_request))
             yield sse_event("status", {"label": "正在通过 Tavily 读取指定网页正文" if page_read else "正在判断是否需要检索近期可信公开资料"})
-            web_results, search_note = (await search_public_references(public_request)
-                                       if dialogue_plan.needs_web or page_read else ([], None))
+            web_results, search_note = (await search_public_references(
+                public_request, model_requested=dialogue_plan.needs_web,
+            ) if dialogue_plan.needs_web or needs_current_public_search(public_request) or page_read else ([], None))
             public_web_context = build_public_web_context(web_results, search_note, question=public_request)
             try:
                 public_egress = prepare_egress([public_web_context], provider=selected_provider)

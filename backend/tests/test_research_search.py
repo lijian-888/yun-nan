@@ -27,6 +27,10 @@ class QueryTests(unittest.TestCase):
         for question in ["不要联网，搜索水稻文献", "仅从本地知识库检索水稻", "查询知识库中的水稻论文"]:
             self.assertFalse(search.needs_current_public_search(question), question)
 
+    def test_literature_request_does_not_depend_on_model_web_flag(self):
+        self.assertTrue(search.needs_current_public_search("帮我找近五年水稻稻瘟病抗性育种的综述文献"))
+        self.assertTrue(search.needs_current_public_search("最近水稻耐盐研究有什么进展？"))
+
     def test_implicit_query_is_generic(self):
         self.assertEqual(search.build_safe_public_query("我们的内部水稻材料编号ABC，近期论文怎么样")[0], "水稻 论文 公开研究资料")
 
@@ -91,7 +95,7 @@ class QueryTests(unittest.TestCase):
 
 
 class TavilyTests(unittest.IsolatedAsyncioTestCase):
-    async def execute(self, question, handler, key="test-key"):
+    async def execute(self, question, handler, key="test-key", model_requested=False):
         requests = []
 
         def transport(request):
@@ -100,7 +104,7 @@ class TavilyTests(unittest.IsolatedAsyncioTestCase):
 
         client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
         with patch.dict(os.environ, {"TAVILY_API_KEY": key}), patch.object(search.httpx, "AsyncClient", return_value=client):
-            result = await search.search_public_references(question)
+            result = await search.search_public_references(question, model_requested=model_requested)
         return result, requests
 
     async def test_search_and_extract_exact_variety(self):
@@ -201,6 +205,20 @@ class TavilyTests(unittest.IsolatedAsyncioTestCase):
             (results, note), calls = await self.execute(question, lambda _: self.fail("private request sent"))
             self.assertEqual(calls, [])
             self.assertEqual(results, [])
+
+    async def test_model_web_request_and_local_only_boundary(self):
+        (results, note), calls = await self.execute(
+            "水稻稳产性评价有什么新方法？", lambda _: httpx.Response(200, json={"results": []}),
+            model_requested=True,
+        )
+        self.assertEqual(results, [])
+        self.assertEqual(len(calls), 1)
+        self.assertIn("未找到", note)
+        (results, note), calls = await self.execute(
+            "不要联网，只看本地资料中的水稻稳产性评价", lambda _: self.fail("local-only request sent"),
+            model_requested=True,
+        )
+        self.assertEqual((results, note, calls), ([], None, []))
 
     async def test_missing_key_and_http_errors(self):
         (_, note), calls = await self.execute(VARIETY, lambda _: self.fail("missing key"), key="")
