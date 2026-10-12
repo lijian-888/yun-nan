@@ -856,6 +856,7 @@ async def stream_research_reply(
                     user_prompt=user_prompt,
                     evidence_context=f"{evidence_context}\n\n{ynaas_database_context}",
                     public_web_context=public_web_context,
+                    response_guidance=response_guidance,
                 )
                 response_mode = "public_search_native" if final_text else "public_search_evidence"
                 final_text = final_text or fallback
@@ -936,7 +937,7 @@ async def stream_research_reply(
 
 async def _native_public_evidence_answer(
     *, api_key: str, base_url: str, model_name: str, user_prompt: str,
-    evidence_context: str, public_web_context: str,
+    evidence_context: str, public_web_context: str, response_guidance: str = "",
 ) -> str | None:
     """One bounded text-only recovery call, not a second search or tool loop."""
     import httpx
@@ -952,6 +953,7 @@ async def _native_public_evidence_answer(
         "截断页面须说明覆盖范围。"
         "本次仅恢复当前轮回答；不要假定未提供的历史信息。"
         "只输出最终答复，不输出思考过程、工具协议或将要搜索的计划。"
+        + response_guidance
     )
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10)) as client:

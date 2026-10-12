@@ -22,10 +22,11 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json={"choices": [{"message": {"content": "检索到赣晚籼35号相关资料。来源：[公开记录](https://www.ricedata.cn/variety/35)。"}}]})
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         with patch("httpx.AsyncClient", return_value=client):
-            result = await agent._native_public_evidence_answer(api_key="test", base_url="https://model.example", model_name="test", user_prompt="找到赣晚籼35号", evidence_context="无本地数据", public_web_context=CONTEXT)
+            result = await agent._native_public_evidence_answer(api_key="test", base_url="https://model.example", model_name="test", user_prompt="找到赣晚籼35号", evidence_context="无本地数据", public_web_context=CONTEXT, response_guidance="只推荐一篇，排名限制只说明一次。")
         self.assertIn("赣晚籼35号", result)
         self.assertNotIn("tools", requests[0])
         self.assertIn("Tavily", requests[0]["messages"][0]["content"])
+        self.assertIn("只推荐一篇，排名限制只说明一次。", requests[0]["messages"][0]["content"])
 
     async def test_empty_and_protocol_rejected(self):
         for content in ["", "...", "<tool>search</tool>"]:
