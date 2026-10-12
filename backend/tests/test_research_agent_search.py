@@ -46,7 +46,7 @@ class NativeRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
 class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
     async def run_reply(self, context, native_answer=None, reasoning_timeout=False,
-                        verified_context="", verified_answer=None):
+                        verified_context="", verified_answer=None, question="找到赣晚籼35号"):
         self.model_kwargs = []
         class Msg:
             def __init__(self, name, content, role):
@@ -83,7 +83,7 @@ class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
             module.__dict__.update(values)
             modules[name] = module
         with patch.dict(sys.modules, modules), patch.dict(os.environ, {"AI_PROVIDER": "cherryin", "YUNNAN_API_KEY": "test"}), patch.object(agent, "_build_react_toolkit", side_effect=toolkit), patch.object(agent, "_execute_controlled_react_action", new=AsyncMock()), patch.object(agent, "_native_public_evidence_answer", new=AsyncMock(return_value=native_answer)), patch.object(agent, "_native_verified_evidence_answer", new=AsyncMock(return_value=verified_answer)):
-            return [event async for event in agent.stream_research_reply(user_prompt="找到赣晚籼35号", evidence_context=verified_context, memory_state={}, public_web_context=context)]
+            return [event async for event in agent.stream_research_reply(user_prompt=question, evidence_context=verified_context, memory_state={}, public_web_context=context)]
 
     async def test_cherryin_uses_non_streaming_agentscope_parser(self):
         await self.run_reply(CONTEXT)
@@ -105,6 +105,18 @@ class EmptyReactTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_results_status_is_not_lost(self):
         events = await self.run_reply(build_public_web_context([], "Tavily 额度受限"))
         self.assertIn("Tavily 额度受限", events[-1]["content"])
+
+    async def test_explicit_web_and_local_knowledge_request_does_not_invent_factors(self):
+        context = build_public_web_context([], "可信公开来源中未找到相关内容")
+        question = "水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我。"
+        verified = "本次问题未检索到可用于支撑结论的本地知识库资料。"
+        self.assertIsNotNone(agent._requested_evidence_unavailable_answer(question, verified, context))
+        self.assertIsNone(agent._requested_evidence_unavailable_answer(question, verified, CONTEXT))
+        self.assertIsNone(agent._requested_evidence_unavailable_answer(question, "已检索到相关知识库资料", context))
+        events = await self.run_reply(context, verified_context=verified, question=question)
+        self.assertEqual(events[-1]["response_mode"], "requested_evidence_unavailable")
+        self.assertIn("暂不能依据", events[-1]["content"])
+        self.assertNotIn("氮肥过量", events[-1]["content"])
 
     async def test_failed_page_is_not_hallucinated_by_model(self):
         context = build_public_web_context([], "网页访问受限", question="https://www.ricedata.cn/variety/varis/601324.htm 这里有什么信息")

@@ -40,6 +40,20 @@ class DialoguePlannerTests(unittest.TestCase):
             with self.assertRaisesRegex(ResearchAgentError, "问题理解未完成"):
                 self.run_plan(output)
 
+    def test_web_plan_identifies_research_problem_separately_from_search_method(self):
+        question = "水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我。"
+        plan = {"intent": "general", "source": "unspecified", "include_counts": False, "needs_web": True,
+                "web_question": "哪些因素引起水稻倒伏，如何影响倒伏风险？", "web_query": "水稻倒伏 原因 影响因素"}
+        result, requests = self.run_plan(json.dumps(plan), question=question)
+        self.assertEqual(result.web_question, plan["web_question"])
+        self.assertEqual(result.web_query, plan["web_query"])
+        self.assertIn(question, requests[0]["messages"][1]["content"])
+        for key in ("web_question", "web_query"):
+            incomplete = dict(plan)
+            incomplete.pop(key)
+            with self.assertRaisesRegex(ResearchAgentError, "问题理解未完成"):
+                self.run_plan(json.dumps(incomplete), question=question)
+
     def test_upstream_failure_is_explicit_not_not_found(self):
         with self.assertRaisesRegex(ResearchAgentError, "未执行数据库查询"):
             self.run_plan("", status=503)

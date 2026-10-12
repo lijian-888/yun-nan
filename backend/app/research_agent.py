@@ -446,6 +446,29 @@ def _empty_answer_error() -> EmptyResearchAnswerError:
     )
 
 
+def _requested_evidence_unavailable_answer(
+    user_prompt: str, evidence_context: str, public_web_context: str,
+) -> str | None:
+    """Do not turn a failed explicit evidence request into unsourced agronomy."""
+    if not (re.search(r"上网|联网|网上|网络|互联网|Tavily", user_prompt, re.I)
+            and re.search(r"(?:本地|院内).{0,8}(?:知识|资料)", user_prompt)):
+        return None
+    if not ("未检索到可用于支撑结论的本地知识库资料" in evidence_context
+            or "未检索到与问题直接相关的本地知识库资料" in evidence_context):
+        return None
+    try:
+        web = json.loads(public_web_context)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(web, dict) or web.get("source") != "Tavily" or web.get("status") != "no_results":
+        return None
+    notice = str(web.get("notice") or "本轮未取得可核验的公开资料。")
+    return ("本轮未取得可用于回答的公开资料，本地知识库也未检索到相关材料，"
+            "因此暂不能依据你指定的来源给出具体结论。\n\n"
+            f"公开检索状态：{notice}\n\n"
+            "请稍后重试，或提供一篇相关文献或公开页面链接；我不会把未经本轮核验的常识写成检索结论。")
+
+
 async def _execute_controlled_react_action(
     *,
     agent: Any,
@@ -578,6 +601,23 @@ async def stream_research_reply(
         yield {"type": "complete", "content": page_failure, "memory_state": state,
                "memory_summary": state.get("_compressed_summary") or None,
                "response_mode": "public_page_unavailable"}
+        return
+    evidence_failure = _requested_evidence_unavailable_answer(
+        user_prompt, evidence_context, public_web_context,
+    )
+    if evidence_failure:
+        failure_memory = InMemoryMemory()
+        if prepared_memory_state:
+            try:
+                failure_memory.load_state_dict(prepared_memory_state, strict=False)
+            except Exception:
+                failure_memory = InMemoryMemory()
+        await failure_memory.add(Msg("researcher", user_prompt, "user"))
+        await failure_memory.add(Msg("agricultural_research_assistant", evidence_failure, "assistant"))
+        state = _strip_binary_attachment_content(failure_memory.state_dict())
+        yield {"type": "complete", "content": evidence_failure, "memory_state": state,
+               "memory_summary": state.get("_compressed_summary") or None,
+               "response_mode": "requested_evidence_unavailable"}
         return
     token_counter = CharTokenCounter()
     formatter = OpenAIChatFormatter(token_counter=token_counter)

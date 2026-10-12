@@ -7361,8 +7361,12 @@ async def research_chat_stream(
             yield sse_event("status", {"label": "正在通过 Tavily 读取指定网页正文" if page_read else "正在判断是否需要检索公开资料"})
             web_results, search_note = (await search_public_references(
                 public_request, model_requested=dialogue_plan.needs_web,
+                research_question=dialogue_plan.web_question,
+                search_query=dialogue_plan.web_query,
+                provider=selected_provider,
             ) if dialogue_plan.needs_web or needs_current_public_search(public_request) or page_read else ([], None))
-            public_web_context = build_public_web_context(web_results, search_note, question=public_request)
+            public_web_context = build_public_web_context(web_results, search_note, question=public_request,
+                research_question=dialogue_plan.web_question, search_query=dialogue_plan.web_query)
             try:
                 public_egress = prepare_egress([public_web_context], provider=selected_provider)
                 public_web_context = public_egress.texts[0]

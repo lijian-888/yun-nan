@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -41,6 +41,11 @@ class QueryTests(unittest.TestCase):
         self.assertTrue(search._topical_discovery(question, "水稻稻瘟病和什么问题有关"))
         self.assertTrue(search._research_source("https://journal.example.org/article/doi/10.1234/rice"))
         self.assertFalse(search._research_source("https://blog.example.org/rice-blast"))
+
+    def test_production_lodging_wording_keeps_subject_and_rejects_knowledge_blog(self):
+        question = "水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我。"
+        target, _ = search.build_safe_public_query(question)
+        self.assertEqual(target, "水稻倒伏问题和什么有关")
 
     def test_local_only(self):
         for question in ["不要联网，搜索水稻文献", "仅从本地知识库检索水稻", "查询知识库中的水稻论文"]:
@@ -114,7 +119,7 @@ class QueryTests(unittest.TestCase):
 
 
 class TavilyTests(unittest.IsolatedAsyncioTestCase):
-    async def execute(self, question, handler, key="test-key", model_requested=False):
+    async def execute(self, question, handler, key="test-key", model_requested=False, **kwargs):
         requests = []
 
         def transport(request):
@@ -123,7 +128,7 @@ class TavilyTests(unittest.IsolatedAsyncioTestCase):
 
         client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
         with patch.dict(os.environ, {"TAVILY_API_KEY": key}), patch.object(search.httpx, "AsyncClient", return_value=client):
-            result = await search.search_public_references(question, model_requested=model_requested)
+            result = await search.search_public_references(question, model_requested=model_requested, **kwargs)
         return result, requests
 
     async def test_search_and_extract_exact_variety(self):
@@ -195,6 +200,44 @@ class TavilyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].url, article)
         self.assertEqual(calls[1][1]["urls"], [article])
+
+    async def test_production_lodging_question_finds_public_evidence(self):
+        question = "水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我。"
+        article = "https://nync.gansu.gov.cn/nync/c118562/202501/174067552.shtml"
+        def handler(request):
+            if request.url.path == "/extract":
+                return httpx.Response(200, json={"results": [{"url": article,
+                    "raw_content": "引起水稻倒伏减产的原因与品种、栽培管理和天气条件有关。"}]})
+            return httpx.Response(200, json={"results": [
+                {"title": "在本地计算机上利用AnythingLLM构建大模型知识库",
+                 "url": "https://www.example.edu.cn/ai/anythingllm", "content": "本地知识库回答问题"},
+                {"title": "引起水稻倒伏减产的原因有哪些，怎样预防？",
+                 "url": article, "content": "水稻倒伏与品种、栽培管理和天气条件有关"},
+            ]})
+        research_question = "哪些因素引起水稻倒伏，如何影响倒伏风险？"
+        query = "水稻倒伏 原因 影响因素"
+        with patch("app.dialogue_orchestration.model_json_request", new=AsyncMock(return_value={"relevant_ids": [1]})) as selector:
+            (results, _), calls = await self.execute(question, handler, provider=object(),
+                research_question=research_question, search_query=query)
+        self.assertEqual(calls[0][1]["query"], query)
+        self.assertEqual(selector.await_args.kwargs["data"]["research_question"], research_question)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].url, article)
+        self.assertEqual(calls[1][1]["urls"], [article])
+
+    async def test_model_query_cannot_send_sensitive_target_or_skip_understanding(self):
+        for query in ("", "附件中的未公开育种材料", "https://172.16.123.193/a"):
+            (results, note), calls = await self.execute("请联网查询", lambda _: self.fail("unsafe query sent"),
+                provider=object(), research_question="公开研究问题", search_query=query)
+            self.assertEqual(results, [])
+            self.assertTrue(note)
+            self.assertEqual(calls, [])
+
+    async def test_relevance_selector_cannot_invent_candidate_ids(self):
+        source = search.PublicSearchResult("公开论文", "https://journal.example.org/article/a", "摘录", "public_search_candidate")
+        with patch("app.dialogue_orchestration.model_json_request", new=AsyncMock(return_value={"relevant_ids": [8]})):
+            with self.assertRaisesRegex(Exception, "相关性核验未完成"):
+                await search._select_relevant_sources(object(), "研究问题", [source])
 
     async def test_direct_detail_extract_when_search_empty(self):
         url = "https://www.ricedata.cn/variety/35"
