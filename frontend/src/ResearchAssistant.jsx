@@ -38,6 +38,7 @@ import GenotypeAssetsWorkspace from "./GenotypeAssetsWorkspace";
 import SkillLibrary from "./SkillLibrary";
 import BreedingIntelligenceWorkspace from "./BreedingIntelligenceWorkspace";
 import TrialAnalysisWorkspace from "./TrialAnalysisWorkspace";
+import VarietySearchWorkspace from "./VarietySearchWorkspace";
 
 const AGENT_NAME = "隆耘 Agent 育种智能体";
 
@@ -139,234 +140,6 @@ function ReportDownloadCard({ message, onDownload }) {
 }
 
 
-const QUERY_OPERATORS = [
-  { value: "gte", label: "不小于" },
-  { value: "gt", label: "大于" },
-  { value: "lte", label: "不超过" },
-  { value: "lt", label: "小于" },
-  { value: "eq", label: "等于" },
-];
-
-function fieldLabel(field) {
-  return field?.unit ? `${field.name} (${field.unit})` : field?.name || "";
-}
-
-function StructuredQueryPanel({ onNotice }) {
-  const [datasets, setDatasets] = useState([]);
-  const [scope, setScope] = useState("rice_phenotype");
-  const [selectedVarieties, setSelectedVarieties] = useState([]);
-  const [varietyKeyword, setVarietyKeyword] = useState("");
-  const [varietyOptions, setVarietyOptions] = useState([]);
-  const [varietyOptionsOpen, setVarietyOptionsOpen] = useState(false);
-  const [varietySearching, setVarietySearching] = useState(false);
-  const [selectedTraitCodes, setSelectedTraitCodes] = useState([]);
-  const [filters, setFilters] = useState([]);
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState("");
-  const varietySearchRequestRef = useRef(0);
-  const varietyComboboxRef = useRef(null);
-
-  const dataset = datasets.find((item) => item.scope === scope);
-  const identityField = dataset?.fields?.find((item) => item.kind === "basic");
-  const traitFields = (dataset?.fields || []).filter((item) => item.kind === "trait");
-  const selectedFields = traitFields.filter((item) => selectedTraitCodes.includes(item.code));
-  const allSelected = traitFields.length > 0 && selectedTraitCodes.length === traitFields.length;
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const catalog = await request("/api/research/standard-fields");
-        setDatasets(catalog.datasets || []);
-      } catch (requestError) {
-        setError(requestError.message || "无法读取标准字段目录。");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!traitFields.length) return;
-    setSelectedTraitCodes(traitFields.map((item) => item.code));
-    setFilters([]);
-    setResult(null);
-  }, [scope, dataset?.scope]);
-
-  useEffect(() => {
-    if (!varietyOptionsOpen) return undefined;
-    const requestId = varietySearchRequestRef.current + 1;
-    varietySearchRequestRef.current = requestId;
-    const timer = window.setTimeout(async () => {
-      setVarietySearching(true);
-      try {
-        const options = await request(`/api/research/published-data/varieties?scope=${scope}&q=${encodeURIComponent(varietyKeyword.trim())}`);
-        if (varietySearchRequestRef.current === requestId) setVarietyOptions(options);
-      } catch (requestError) {
-        if (varietySearchRequestRef.current === requestId) setError(requestError.message || "无法搜索品种名称。");
-      } finally {
-        if (varietySearchRequestRef.current === requestId) setVarietySearching(false);
-      }
-    }, 180);
-    return () => window.clearTimeout(timer);
-  }, [scope, varietyKeyword, varietyOptionsOpen]);
-
-  useEffect(() => {
-    function closeVarietyOptions(event) {
-      if (!varietyComboboxRef.current?.contains(event.target)) setVarietyOptionsOpen(false);
-    }
-    window.addEventListener("pointerdown", closeVarietyOptions);
-    return () => window.removeEventListener("pointerdown", closeVarietyOptions);
-  }, []);
-
-  function switchScope(nextScope) {
-    if (nextScope === scope) return;
-    setScope(nextScope);
-    setSelectedVarieties([]);
-    setVarietyKeyword("");
-    setVarietyOptionsOpen(false);
-    setError("");
-  }
-
-  function selectVariety(option) {
-    setSelectedVarieties((current) => current.some((item) => item.id === option.id) ? current : [...current, option]);
-    setVarietyKeyword("");
-    setVarietyOptionsOpen(false);
-  }
-
-  function removeSelectedVariety(id) {
-    setSelectedVarieties((current) => current.filter((item) => item.id !== id));
-  }
-
-  function toggleTrait(code) {
-    setSelectedTraitCodes((current) => current.includes(code)
-      ? current.filter((item) => item !== code)
-      : [...current, code]);
-  }
-
-  function toggleAllTraits() {
-    setSelectedTraitCodes(allSelected ? [] : traitFields.map((item) => item.code));
-  }
-
-  function addFilter() {
-    const firstField = traitFields[0];
-    if (!firstField || filters.length >= 6) return;
-    setFilters((current) => [...current, { trait_code: firstField.code, operator: "gte", value: "" }]);
-    setSelectedTraitCodes((current) => current.includes(firstField.code) ? current : [...current, firstField.code]);
-  }
-
-  function updateFilter(index, patch) {
-    setFilters((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
-    if (patch.trait_code) {
-      setSelectedTraitCodes((current) => current.includes(patch.trait_code) ? current : [...current, patch.trait_code]);
-    }
-  }
-
-  function removeFilter(index) {
-    setFilters((current) => current.filter((_, itemIndex) => itemIndex !== index));
-  }
-
-  function exportCsv() {
-    if (!result?.records?.length) return;
-    const columns = [identityField?.name || "品种/材料名称", "别名", ...selectedFields.map(fieldLabel)];
-    const escapeCell = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-    const rows = result.records.map((record) => [
-      record.variety_name,
-      record.aliases?.join("、") || "",
-      ...selectedFields.map((field) => record.traits?.[field.code]?.value ?? ""),
-    ]);
-    const csv = `\uFEFF${[columns, ...rows].map((row) => row.map(escapeCell).join(",")).join("\r\n")}`;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `已发布标准数据查询-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  async function runQuery(event) {
-    event.preventDefault();
-    setError("");
-    if (!selectedTraitCodes.length) {
-      setError("请至少选择一个需要展示的标准字段。");
-      return;
-    }
-    if (filters.some((item) => item.value === "" || Number.isNaN(Number(item.value)))) {
-      setError("每个数值筛选条件都需要填写有效数值。");
-      return;
-    }
-    setRunning(true);
-    try {
-      const response = await request("/api/research/published-data/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scope,
-          variety_names: selectedVarieties.map((item) => item.variety_name),
-          trait_codes: selectedTraitCodes,
-          filters: filters.map((item) => ({ ...item, value: Number(item.value) })),
-          limit: 100,
-        }),
-      });
-      setResult(response);
-      if (response.unresolved_variety_names?.length) {
-        onNotice(`未找到以下已发布品种或别名：${response.unresolved_variety_names.join("、")}`);
-      }
-    } catch (requestError) {
-      setError(requestError.message || "查询未完成，请稍后重试。");
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  if (loading) return <section className="structured-query-loading"><LoaderCircle size={18} className="spin" />正在读取可查询的标准字段</section>;
-
-  return <section className="structured-query-panel">
-    <div className="structured-query-heading">
-      <div><p>只读查询已发布标准数据</p><h2>结构化查询</h2><span>按标准模板选择字段和范围条件，系统自动使用受控查询，不需要填写 SQL。</span></div>
-      <span className="structured-query-limit">单次最多返回 100 个品种/材料</span>
-    </div>
-
-    <div className="dataset-switch" role="tablist" aria-label="选择标准数据模板">
-      {datasets.map((item) => <button key={item.scope} type="button" role="tab" aria-selected={scope === item.scope} className={scope === item.scope ? "active" : ""} onClick={() => switchScope(item.scope)}>{item.title}</button>)}
-    </div>
-
-    {dataset && <form className="structured-query-form" onSubmit={runQuery}>
-      <div className="structured-query-description">{dataset.description}</div>
-      <div className="structured-name-input"><span>{identityField?.name || "品种/材料名称"}（可选）</span><div className="variety-combobox" ref={varietyComboboxRef}><div className="variety-selected-list">{selectedVarieties.map((item) => <span className="variety-selected-chip" key={item.id}>{item.variety_name}<button type="button" title={`移除 ${item.variety_name}`} onClick={() => removeSelectedVariety(item.id)}><X size={13} /></button></span>)}</div><input value={varietyKeyword} onFocus={() => setVarietyOptionsOpen(true)} onMouseDown={(event) => { if (document.activeElement === event.currentTarget) { event.preventDefault(); setVarietyOptionsOpen((current) => !current); } }} onKeyDown={(event) => { if (event.key === "Escape") setVarietyOptionsOpen(false); if (event.key === "ArrowDown") setVarietyOptionsOpen(true); }} onChange={(event) => { setVarietyKeyword(event.target.value); setVarietyOptionsOpen(true); }} placeholder="输入品种名称或别名进行模糊搜索" autoComplete="off" /><button className="variety-combobox-toggle" type="button" title={varietyOptionsOpen ? "收起候选品种" : "展开候选品种"} aria-label={varietyOptionsOpen ? "收起候选品种" : "展开候选品种"} aria-expanded={varietyOptionsOpen} onMouseDown={(event) => event.preventDefault()} onClick={() => setVarietyOptionsOpen((current) => !current)}><ChevronDown size={16} /></button>{varietyOptionsOpen && <div className="variety-option-list" role="listbox">{varietySearching ? <span className="variety-option-note"><LoaderCircle size={14} className="spin" />正在搜索已发布品种</span> : varietyOptions.length ? varietyOptions.map((item) => <button type="button" role="option" key={item.id} aria-selected={selectedVarieties.some((selected) => selected.id === item.id)} onMouseDown={(event) => event.preventDefault()} onClick={() => selectVariety(item)}><strong>{item.variety_name}</strong><span>{item.aliases?.length ? `别名：${item.aliases.join("、")}` : "暂无别名"}{item.approval_number ? ` · ${item.approval_number}` : ""}</span></button>) : <span className="variety-option-note">没有匹配的已发布品种或别名。</span>}</div>}</div><small>点击输入框或右侧箭头展开/收起候选品种；不选择名称时，可按下方数值条件查询全部已发布品种/材料。</small></div>
-
-      <section className="structured-field-section">
-        <div className="structured-section-title"><div><strong>展示字段</strong><span>勾选查询结果中需要展示的标准字段</span></div><button className="text-button" type="button" onClick={toggleAllTraits}>{allSelected ? "取消全选" : "全选全部字段"}</button></div>
-        <div className="structured-field-grid">
-          {traitFields.map((field) => <label className="structured-field-option" key={field.code}><input type="checkbox" checked={selectedTraitCodes.includes(field.code)} onChange={() => toggleTrait(field.code)} /><span>{fieldLabel(field)}</span></label>)}
-        </div>
-      </section>
-
-      <section className="structured-filter-section">
-        <div className="structured-section-title"><div><strong>数值筛选条件</strong><span>可选，最多 6 条；同一字段可添加上下限，形成区间。</span></div><button className="secondary-button" type="button" onClick={addFilter} disabled={filters.length >= 6}><Plus size={15} />新增条件</button></div>
-        {!filters.length && <div className="structured-filter-empty">未添加条件时，将按名称或已发布数据范围查询。</div>}
-        {filters.map((filter, index) => <div className="structured-filter-row" key={`${filter.trait_code}-${index}`}>
-          <select value={filter.trait_code} onChange={(event) => updateFilter(index, { trait_code: event.target.value })}>{traitFields.map((field) => <option value={field.code} key={field.code}>{fieldLabel(field)}</option>)}</select>
-          <select value={filter.operator} onChange={(event) => updateFilter(index, { operator: event.target.value })}>{QUERY_OPERATORS.map((operator) => <option value={operator.value} key={operator.value}>{operator.label}</option>)}</select>
-          <input type="number" step="any" value={filter.value} onChange={(event) => updateFilter(index, { value: event.target.value })} placeholder="数值" />
-          <button className="icon-button" type="button" title="移除此筛选条件" onClick={() => removeFilter(index)}><X size={16} /></button>
-        </div>)}
-      </section>
-
-      {error && <div className="structured-query-error">{error}</div>}
-      <div className="structured-query-actions"><button className="primary-button" type="submit" disabled={running}><Search size={17} />{running ? "正在查询" : "查询已发布标准数据"}</button></div>
-    </form>}
-
-    {result && <section className="structured-query-result">
-      <div className="structured-result-heading"><div><h3>查询结果</h3><span>命中 {result.record_count} 个品种/材料，共 {result.observation_count} 条已发布字段记录。</span></div><div className="structured-result-actions"><span>查询模板：{result.template_code || "—"}</span><button className="secondary-button" type="button" onClick={exportCsv} disabled={!result.records?.length}><FileText size={15} />导出 CSV</button></div></div>
-      <div className="table-scroll structured-result-table"><table><thead><tr><th>{identityField?.name || "品种/材料名称"}</th><th>别名</th>{selectedFields.map((field) => <th key={field.code}>{fieldLabel(field)}</th>)}</tr></thead><tbody>{result.records?.length ? result.records.map((record) => <tr key={record.id}><td>{record.variety_name}</td><td>{record.aliases?.join("、") || "—"}</td>{selectedFields.map((field) => <td key={field.code}>{record.traits?.[field.code]?.value ?? "—"}</td>)}</tr>) : <tr><td className="empty-cell" colSpan={selectedFields.length + 2}>没有命中符合条件的已发布标准数据。</td></tr>}</tbody></table></div>
-    </section>}
-  </section>;
-}
 
 export default function ResearchAssistant({ platformContext }) {
   const [user, setUser] = useState(null);
@@ -883,7 +656,7 @@ export default function ResearchAssistant({ platformContext }) {
         </section>
         <section className="research-workspace-group" aria-label="管理">
           <small>管理</small>
-          <button type="button" className={workspace === "structured" ? "active" : ""} onClick={() => setWorkspace("structured")}><Search size={16} />结构化查询</button>
+          <button type="button" className={workspace === "structured" ? "active" : ""} onClick={() => { setWorkspace("structured"); setNotice(""); }}><Search size={16} />结构化查询</button>
           <button type="button" className={workspace === "intelligence" ? "active" : ""} onClick={() => setWorkspace("intelligence")}><Scale size={16} />种质解析与亲本推荐</button>
           <button type="button" className={workspace === "trial-analysis" ? "active" : ""} onClick={() => setWorkspace("trial-analysis")}><BarChart3 size={16} />田间试验自动分析</button>
           <button type="button" className={workspace === "genotype" ? "active" : ""} onClick={() => setWorkspace("genotype")}><Dna size={16} />基因型导入与质控</button>
@@ -905,7 +678,7 @@ export default function ResearchAssistant({ platformContext }) {
     </aside>
 
     <main className={`research-main ${workspace === "knowledge" ? "knowledge-main" : workspace === "structured" ? "structured-main" : workspace === "gwas" ? "gwas-main" : workspace === "genotype" ? "genotype-main" : workspace === "skills" ? "skills-main" : workspace === "results" ? "results-main" : workspace === "intelligence" || workspace === "trial-analysis" ? "intelligence-main" : ""}`}>
-      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "基因型数据" : workspace === "assistant" && businessPolicy?.shared_workspace ? "服务器业务数据按权限共享查询" : "仅查询院内已发布数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : "结构化查询"}</h1></div></header>}
+      {workspace !== "knowledge" && workspace !== "results" && workspace !== "skills" && workspace !== "intelligence" && workspace !== "trial-analysis" && <header className="research-topbar"><div><p>{platformContext?.institution?.name || "云南省农业科学院"} · {workspace === "gwas" ? "固定生信工作流" : workspace === "genotype" ? "基因型数据" : workspace === "structured" ? "服务器品种与共享材料数据" : workspace === "assistant" && businessPolicy?.shared_workspace ? "服务器业务数据按权限共享查询" : "仅查询院内已发布数据"}</p><h1>{workspace === "assistant" ? activeSession?.title || AGENT_NAME : workspace === "gwas" ? "水稻连续性状 GWAS" : workspace === "genotype" ? "基因型导入与水稻专用质控" : "结构化查询"}</h1></div></header>}
 
       {notice && <div className="assistant-notice"><span>{notice}</span><button title="关闭提示" onClick={() => setNotice("")}><X size={16} /></button></div>}
 
@@ -987,7 +760,7 @@ export default function ResearchAssistant({ platformContext }) {
           </div>
         </form>
       </section>
-      </> : workspace === "structured" ? <StructuredQueryPanel onNotice={setNotice} /> : workspace === "intelligence" ? <BreedingIntelligenceWorkspace onNotice={setNotice} /> : workspace === "trial-analysis" ? <TrialAnalysisWorkspace onNotice={setNotice} /> : workspace === "gwas" ? <GwasWorkspace onNotice={setNotice} /> : workspace === "genotype" ? <GenotypeAssetsWorkspace onNotice={setNotice} /> : workspace === "skills" ? <SkillLibrary onNotice={setNotice} onOpenWorkspace={openResearchSkill} /> : workspace === "knowledge" ? <KnowledgeLibrary onNotice={setNotice} /> : <ResultsLibrary onNotice={setNotice} />}
+      </> : workspace === "structured" ? <VarietySearchWorkspace /> : workspace === "intelligence" ? <BreedingIntelligenceWorkspace onNotice={setNotice} /> : workspace === "trial-analysis" ? <TrialAnalysisWorkspace onNotice={setNotice} /> : workspace === "gwas" ? <GwasWorkspace onNotice={setNotice} /> : workspace === "genotype" ? <GenotypeAssetsWorkspace onNotice={setNotice} /> : workspace === "skills" ? <SkillLibrary onNotice={setNotice} onOpenWorkspace={openResearchSkill} /> : workspace === "knowledge" ? <KnowledgeLibrary onNotice={setNotice} /> : <ResultsLibrary onNotice={setNotice} />}
     </main>
 
     {preview && <div className="attachment-preview-backdrop" onMouseDown={() => setPreview(null)}><section className={`attachment-preview ${preview.image_url ? "image-preview" : ""}`} onMouseDown={(event) => event.stopPropagation()}><header><div><p>{preview.image_url ? "当前会话私有原图" : "本地解析文字预览"}</p><h2>{preview.file_name}</h2></div><button className="icon-button" title="关闭预览" onClick={() => setPreview(null)}><X size={17} /></button></header>{preview.parser_warnings?.map((warning) => <div className="preview-warning" key={warning}>{warning}</div>)}{preview.image_url ? <div className="attachment-image-full"><img src={preview.image_url} alt={preview.file_name} /></div> : <pre>{preview.preview || "该附件未解析出可预览文本。"}</pre>}{preview.preview_truncated && <small>预览仅显示前 60,000 个字符；完整文本仍仅保存在当前会话的私有附件中。</small>}</section></div>}

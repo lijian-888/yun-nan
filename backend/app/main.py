@@ -152,6 +152,7 @@ from .ai_gateway import (
     shared_business_egress_enabled,
 )
 from .business_data_query import DataQuery, BusinessQueryError, load_business_catalog, execute_business_query, build_business_evidence
+from .variety_search import create_variety_search_router
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
 from .research_search import build_public_web_context, needs_current_public_search, requested_public_pages, resolve_public_request, search_public_references
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
@@ -2968,6 +2969,7 @@ def serialize_public_query_execution(execution: Any) -> dict[str, Any]:
 
 
 app = FastAPI(title="隆耘 Agent 育种智能体", version="1.5.0")
+app.include_router(create_variety_search_router(require_business_user, get_business_query_session))
 ACPS_SETTINGS = AcpsSettings.from_env()
 ACPS_DIRECT_LEADER = AcpsDirectLeaderRuntime(ACPS_SETTINGS)
 ACPS_GROUP_LEADER = AcpsGroupLeaderRuntime(ACPS_SETTINGS)
