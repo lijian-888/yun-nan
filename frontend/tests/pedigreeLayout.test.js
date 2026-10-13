@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { visiblePedigree, layoutPedigree, expandLevels, fitView, zoomView } from "../src/pedigreeLayout.js";
+import { readFileSync } from "node:fs";
+import { visiblePedigree, layoutPedigree, expandLevels, fitView, zoomView, NODE_WIDTH, NODE_HEIGHT, nodeNameLines } from "../src/pedigreeLayout.js";
 
 const graph = { root_ids:[1], nodes:[1,2,3,4,5].map(id=>({id,name:id===2||id===3?"同名亲本":String(id)})),
   edges:[{id:1,child_id:1,parent_id:2},{id:2,child_id:1,parent_id:3},{id:3,child_id:2,parent_id:4},{id:4,child_id:3,parent_id:4}] };
@@ -11,7 +12,7 @@ test("default starts with root, expanding retains same-named distinct identities
 test("one click all keeps every saved node, including disconnected nodes",()=>{
   const visible=visiblePedigree(graph,new Set(),true);
   assert.equal(visible.nodes.length,5); assert.equal(visible.edges.length,4);
-  assert.equal(layoutPedigree(graph,visible).nodes.find(n=>n.id===5).disconnected,true);
+  assert.equal(layoutPedigree(graph,visible).nodes.find(n=>n.sourceId==='5').disconnected,true);
 });
 test("shared ancestor survives collapsing one of its visible branches",()=>{
   assert.deepEqual(visiblePedigree(graph,new Set(['1','3'])).nodes.map(n=>n.id),[1,2,3,4]);
@@ -31,4 +32,76 @@ test("fit and zoom remain bounded and keep anchor fixed",()=>{
   assert.ok(view.scale>=.08&&view.scale<=1.15);
   const next=zoomView({scale:1,x:0,y:0},2,{x:100,y:100});
   assert.deepEqual(next,{scale:2,x:-100,y:-100});
+});
+
+function verifyTree(source) {
+  const layout=layoutPedigree(source,visiblePedigree(source,new Set(),true));
+  assert.equal(layout.edges.length,source.edges.length,"every original relation must remain");
+  assert.deepEqual(layout.edges.map(e=>e.id).sort(),source.edges.map(e=>e.id).sort());
+  assert.equal(layout.nodes.filter(n=>!n.referenceTo).length,source.nodes.length);
+  assert.ok(layout.nodes.length<=source.nodes.length+source.edges.length,"bounded unfolding");
+  for(const n of layout.nodes){
+    assert.ok(Number.isFinite(n.x)&&Number.isFinite(n.y));
+    if(n.referenceTo){const target=layout.nodes.find(t=>t.id===n.referenceTo);assert.equal(target.sourceId,n.sourceId);assert.ok(!target.referenceTo);assert.equal(n.children.length,0);}
+  }
+  for(let i=0;i<layout.nodes.length;i++)for(let j=i+1;j<layout.nodes.length;j++){
+    const a=layout.nodes[i],b=layout.nodes[j];
+    assert.ok(Math.abs(a.x-b.x)>=NODE_WIDTH||Math.abs(a.y-b.y)>=NODE_HEIGHT,"cards never overlap");
+  }
+  const segments=layout.edges.flatMap(edge=>edge.points.slice(1).map((point,index)=>({edge,a:edge.points[index],b:point})))
+    .filter(s=>s.a.x!==s.b.x||s.a.y!==s.b.y);
+  for(let i=0;i<segments.length;i++)for(let j=i+1;j<segments.length;j++){
+    const a=segments[i],b=segments[j];
+    if(a.edge.from.id===b.edge.from.id)continue; // One branch's own shared trunk is a junction, not a crossing.
+    const ax=[Math.min(a.a.x,a.b.x),Math.max(a.a.x,a.b.x)],ay=[Math.min(a.a.y,a.b.y),Math.max(a.a.y,a.b.y)];
+    const bx=[Math.min(b.a.x,b.b.x),Math.max(b.a.x,b.b.x)],by=[Math.min(b.a.y,b.b.y),Math.max(b.a.y,b.b.y)];
+    assert.ok(Math.max(ax[0],bx[0])>Math.min(ax[1],bx[1])||Math.max(ay[0],by[0])>Math.min(ay[1],by[1]),`unrelated edges ${a.edge.id}/${b.edge.id} cross or overlap`);
+  }
+  // No line passes through an unrelated card, even with long or cyclic branches.
+  for(const s of segments)for(const n of layout.nodes){
+    if(n.id===s.edge.from.id||n.id===s.edge.to.id)continue;
+    const x0=Math.min(s.a.x,s.b.x),x1=Math.max(s.a.x,s.b.x),y0=Math.min(s.a.y,s.b.y),y1=Math.max(s.a.y,s.b.y);
+    assert.ok(x1<=n.x||x0>=n.x+NODE_WIDTH||y1<=n.y||y0>=n.y+NODE_HEIGHT,"line enters unrelated card");
+  }
+  return layout;
+}
+test("shared ancestors are terminal references; identity is never merged by name",()=>{
+  const layout=verifyTree(graph);
+  assert.equal(layout.referenceCount,1);
+  assert.equal(layout.nodes.filter(n=>n.name==='同名亲本').length,2);
+});
+test("mother before father, source order stable within unspecified relations",()=>{
+  const source={root_ids:[1],nodes:[1,2,3,4].map(id=>({id})),edges:[{id:1,child_id:1,parent_id:2,role:'male'},{id:2,child_id:1,parent_id:3,role:'female'},{id:3,child_id:1,parent_id:4,role:'unknown'}]};
+  const layout=verifyTree(source),get=id=>layout.nodes.find(n=>n.sourceId===String(id));
+  assert.ok(get(3).y<get(2).y&&get(2).y<get(4).y);
+});
+test("cycles and disconnected components remain visible without crossing remote links",()=>{
+  const source={...graph,edges:[...graph.edges,{id:5,child_id:4,parent_id:1},{id:6,child_id:5,parent_id:4}]};
+  const layout=verifyTree(source);
+  assert.equal(layout.nodes.filter(n=>n.cycle).length,1);
+});
+test("collapsing one branch rehomes the shared ancestor and its ancestry",()=>{
+  const source={...graph,nodes:[...graph.nodes,{id:6}],edges:[...graph.edges,{id:7,child_id:4,parent_id:6}]};
+  const visible=visiblePedigree(source,new Set(['1','3','4']));
+  const layout=layoutPedigree(source,visible);
+  const shared=layout.nodes.filter(n=>n.sourceId==='4');
+  assert.equal(shared.length,1);assert.ok(!shared[0].referenceTo);
+  assert.equal(shared[0].children[0].sourceId,'6');
+  assert.deepEqual(layout.edges.map(e=>e.id).sort(),visible.edges.map(e=>e.id).sort());
+});
+test("inverted ID order and diamond chains do not create exponential layouts",()=>{
+  const source={root_ids:[0],nodes:[{id:0}],edges:[]};let end=0;
+  for(let i=1;i<=25;i++){
+    const a=i*3,b=a+1,c=a+2;source.nodes.push({id:a},{id:b},{id:c});
+    source.edges.push({id:source.edges.length,child_id:end,parent_id:b},{id:source.edges.length+1,child_id:end,parent_id:a},{id:source.edges.length+2,child_id:a,parent_id:c},{id:source.edges.length+3,child_id:b,parent_id:c});end=c;
+  }
+  verifyTree(source);
+});
+test("long names wrap; full source name stays untouched",()=>{
+  const name='田两优9号（田两优桂99）';assert.equal(nodeNameLines(name).join(''),name);
+  assert.ok(nodeNameLines('祖'.repeat(80))[1].endsWith('…'));
+});
+test("real public server snapshots: all relations retained without crossings",{skip:!process.env.PEDIGREE_PREVIEW_FIXTURE},()=>{
+  const fixture=JSON.parse(readFileSync(process.env.PEDIGREE_PREVIEW_FIXTURE,'utf8'));
+  for(const snapshot of Object.values(fixture.graphs))verifyTree(snapshot);
 });

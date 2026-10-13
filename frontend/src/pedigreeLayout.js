@@ -1,7 +1,7 @@
 // Pure layout/traversal. Snapshot identity, not names, determines each node.
 const key = id => String(id);
-export const NODE_WIDTH = 210;
-export const NODE_HEIGHT = 60;
+export const NODE_WIDTH = 240;
+export const NODE_HEIGHT = 100;
 
 export function visiblePedigree(graph, expanded = new Set(), showAll = false) {
   if (!graph) return { nodes: [], edges: [] };
@@ -42,26 +42,83 @@ export function expandLevels(graph, levels) {
 }
 
 export function layoutPedigree(graph, visible) {
-  const depths = pedigreeDepths(graph);
-  const disconnectedLevel = Math.max(0, ...depths.values())+1;
-  const groups = new Map();
-  visible.nodes.forEach(node => {
-    const depth = depths.get(key(node.id)) ?? disconnectedLevel;
-    const items = groups.get(depth) || []; items.push(node); groups.set(depth, items);
+  // A source DAG is not necessarily planar. Unfold only its spanning forest;
+  // each remaining edge ends at a labelled reference, NEVER a remote cross-link.
+  // Every source node has exactly one canonical card; every source edge appears
+  // exactly once. References are leaves, so size is O(V+E), not exponential.
+  const sources = new Map(visible.nodes.map(node => [key(node.id), node]));
+  const adjacency = new Map();
+  const rank = {female:0,male:1,parent:2,unknown:3};
+  visible.edges.forEach(edge => {
+    if (!sources.has(key(edge.child_id)) || !sources.has(key(edge.parent_id))) return;
+    const items = adjacency.get(key(edge.child_id)) || [];
+    items.push(edge); adjacency.set(key(edge.child_id),items);
   });
-  const rowCount = Math.max(1, ...[...groups.values()].map(nodes => nodes.length));
-  const height = Math.max(260, rowCount*86+100);
-  const positions = new Map();
-  groups.forEach((nodes, depth) => {
-    nodes.sort((a,b) => Number(a.id)-Number(b.id));
-    const offset = (height - nodes.length*86)/2;
-    nodes.forEach((node,index) => positions.set(key(node.id), {x:60+depth*286,y:offset+index*86}));
+  adjacency.forEach(items => items.sort((a,b) => (rank[a.role]??3)-(rank[b.role]??3) ||
+    Number(a.display_order||0)-Number(b.display_order||0) || key(a.id).localeCompare(key(b.id),"en",{numeric:true})));
+  const reachable = pedigreeDepths(graph);
+  const rootIds = new Set(graph.root_ids.map(key));
+  const canonical = new Map(), active = new Set(), nodes = [], edges = [], roots = [];
+  function card(sourceId, depth, disconnected, edge) {
+    const existing = canonical.get(sourceId);
+    const node = {...sources.get(sourceId),sourceId,id:`card-${nodes.length}`,depth,
+      disconnected,relation:edge?.role,is_root:!edge && rootIds.has(sourceId),
+      children:[],referenceTo:existing?.id,cycle:Boolean(existing&&active.has(sourceId))};
+    nodes.push(node);
+    if (!existing) canonical.set(sourceId,node);
+    return node;
+  }
+  // Iterative DFS also handles very deep source trees without call-stack overflow.
+  const rootOrder = [...graph.root_ids.map(key), ...visible.nodes.map(n=>key(n.id))];
+  rootOrder.forEach(sourceId => {
+    if (!sources.has(sourceId) || canonical.has(sourceId)) return;
+    const root = card(sourceId,0,!reachable.has(sourceId)); roots.push(root);
+    active.add(sourceId);
+    const stack = [{node:root,index:0}];
+    while (stack.length) {
+      const frame = stack[stack.length-1], outgoing = adjacency.get(frame.node.sourceId)||[];
+      if (frame.index===outgoing.length) {active.delete(frame.node.sourceId);stack.pop();continue;}
+      const edge = outgoing[frame.index++];
+      const child = card(key(edge.parent_id),frame.node.depth+1,frame.node.disconnected,edge);
+      frame.node.children.push(child);
+      edges.push({...edge,from:frame.node,to:child});
+      if (!child.referenceTo) {active.add(child.sourceId);stack.push({node:child,index:0});}
+    }
   });
-  const nodes = visible.nodes.map(node => ({ ...node, ...positions.get(key(node.id)), disconnected: !depths.has(key(node.id)) }));
-  const edges = visible.edges.map(edge => ({ ...edge, from:positions.get(key(edge.child_id)), to:positions.get(key(edge.parent_id)) })).filter(e => e.from && e.to);
-  const width = Math.max(380, ...nodes.map(n => n.x+NODE_WIDTH+60));
-  const labels = [...groups.keys()].map(depth => ({x:60+depth*286,y:30,label:depth===disconnectedLevel ? "未连接来源节点" : depth===0 ? "当前品种" : `亲本系谱第 ${depth} 层`}));
-  return {nodes,edges,width,height,labels};
+  // Each subtree owns a disjoint vertical interval. Orthogonal routes stay in
+  // its own inter-column gutter; only siblings from one source share a trunk.
+  const gap = 26, column = NODE_WIDTH+100;
+  for(let i=nodes.length-1;i>=0;i--) {
+    const node = nodes[i];
+    node.span = node.children.length ? node.children.reduce((sum,n)=>sum+n.span,0)+gap*(node.children.length-1) : NODE_HEIGHT;
+  }
+  let top = 64;
+  roots.forEach(root => {
+    root.top = top; top += root.span+80;
+    const pending = [root];
+    while(pending.length) {
+      const node = pending.pop(); node.x = 40+node.depth*column;
+      // Top-align each branch: even a large all-expanded tree starts with a
+      // visible root-to-mother path, rather than a root floating in empty space.
+      node.y = node.top;
+      let childTop = node.top;
+      node.children.forEach(child => {child.top=childTop;childTop+=child.span+gap;pending.push(child);});
+    }
+  });
+  edges.forEach(edge => {
+    const sx=edge.from.x+NODE_WIDTH,sy=edge.from.y+NODE_HEIGHT/2,tx=edge.to.x,ty=edge.to.y+NODE_HEIGHT/2;
+    edge.points=[{x:sx,y:sy},{x:sx+50,y:sy},{x:sx+50,y:ty},{x:tx,y:ty}];
+  });
+  const labels = roots.map(root=>({x:root.x,y:root.top-22,label:root.disconnected?"未连接来源节点（不认定为当前品种祖先）":"当前品种 → 亲本 → 更早祖先"}));
+  return {nodes,edges,labels,width:Math.max(380,...nodes.map(n=>n.x+NODE_WIDTH+40)),height:Math.max(260,top),
+    referenceCount:nodes.filter(n=>n.referenceTo).length};
+}
+
+export function nodeNameLines(value) {
+  const characters = Array.from(String(value||""));
+  const lines = [characters.slice(0,16).join(""),characters.slice(16,32).join("")].filter(Boolean);
+  if(characters.length>32) lines[1]+="…";
+  return lines;
 }
 
 export function fitView(layout, viewport) {
