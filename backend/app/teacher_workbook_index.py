@@ -70,13 +70,13 @@ def _unit(header: str, value: str) -> str:
         return "%"
     label = normalized(header)
     # '千粒重' contains 粒 but does not state its unit. Only explicit units count.
-    explicit = " ".join(re.findall(r"\(([^)]*)\)", label))
+    explicit = re.findall(r"\(([^)]*)\)", label)
     if "%" in label:
-        explicit += " %"
-    unit = re.search(r"公斤/亩|千克/亩|kg/亩|kg/mu|厘米|毫米|cm|mm|kg|公斤|千克|(?<![a-z])g(?![a-z])|克|%|粒|天|(?<![a-z])d(?![a-z])|级", explicit)
-    if not unit:
-        return ""
-    return {"厘米": "cm", "毫米": "mm", "公斤": "kg", "千克": "kg", "克": "g", "公斤/亩": "kg/亩", "千克/亩": "kg/亩", "d": "天"}.get(unit.group(), unit.group())
+        explicit.append("%")
+    for unit in explicit:
+        if re.fullmatch(r"(?:μg|ug|mg|g|kg|cm|mm|m|厘米|毫米|克|公斤|千克)(?:[23]|/(?:kg|g|m[23]?|亩|mu|公顷|ha))?|%|亩|公顷|粒|天|d|级|度|°", unit):
+            return {"厘米": "cm", "毫米": "mm", "公斤": "kg", "千克": "kg", "克": "g", "公斤/亩": "kg/亩", "千克/亩": "kg/亩", "kg/mu": "kg/亩", "d": "天"}.get(unit, unit)
+    return ""
 
 
 def index_path() -> Path:

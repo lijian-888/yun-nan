@@ -5,6 +5,7 @@ import json
 import asyncio
 import re
 import sqlite3
+import logging
 from decimal import Decimal
 from contextlib import closing
 from typing import Any
@@ -15,6 +16,8 @@ from .ai_gateway import prepare_egress, shared_business_egress_enabled
 from .dialogue_orchestration import model_json_request
 from .research_agent import ResearchAgentError
 from .teacher_workbook_index import open_index, normalized, metric_code, generic_metric, METRICS, verify_manifest, verify_sources
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class TeacherFileQuery(BaseModel):
@@ -161,11 +164,23 @@ async def build_teacher_file_evidence(*, provider, question, history, prior_quer
         raise ResearchAgentError("老师共享文件当前未获准发送至外部模型，请切换本地模型。")
     safe = prepare_egress([question, json.dumps(prior_query, ensure_ascii=False),
                            json.dumps((history or [])[-8:], ensure_ascii=False)], provider=provider)
-    raw = await model_json_request(provider=provider, contract=QUERY_CONTRACT, data={
-        "question": safe.texts[0], "history": json.loads(safe.texts[2]), "previous_teacher_query": json.loads(safe.texts[1]),
-        "available_metrics": list(METRICS), "skip_means_list_all": skipped})
+    safe_history = [{"role": item.get("role"), "content": str(item.get("content") or "")[:1200]}
+                    for item in json.loads(safe.texts[2])]
+    # Retry only interpretation failures; never retry by guessing a query/value.
+    for attempt in range(2):
+        try:
+            raw = await model_json_request(provider=provider, contract=QUERY_CONTRACT, data={
+                "question": safe.texts[0], "history": safe_history, "previous_teacher_query": json.loads(safe.texts[1]),
+                "available_metrics": list(METRICS), "skip_means_list_all": skipped,
+                "format_reminder": "只返回参数JSON；year为整数或null，conditions为对象，两个确认开关为布尔值，不执行工具。"})
+            query = TeacherFileQuery.model_validate(raw)
+            break
+        except (ResearchAgentError, ValidationError) as exc:
+            logger.warning("Teacher source query interpretation failed: attempt=%s cause=%s", attempt + 1,
+                           type(exc.__cause__ or exc).__name__)
+            if attempt:
+                raise ResearchAgentError("原文件查询条件理解暂未完成，未查询或返回任何指标数值，请重试。") from exc
     try:
-        query = TeacherFileQuery.model_validate(raw)
         if query.confirm_identity and not original_question:
             confirmed_same_scope = prior_query and prior_query.get("confirm_identity") and all(
                 query.model_dump()[key] == prior_query.get(key) for key in ("material", "file", "sheet"))
@@ -199,7 +214,8 @@ def validate_teacher_answer(answer: str, scope: dict | None):
             raise ResearchAgentError("模型回答的数值或单位与所查原单元格不一致，未展示回答。")
     for row in valid:
         # Every source value must be represented and tied to its own receipt.
-        lines = [line for line in answer.splitlines() if row["citation"] in line]
+        lines = ([answer] if len(valid) == 1 and row["citation"] in answer else
+                 [line for line in answer.splitlines() if row["citation"] in line])
         numeric = re.fullmatch(r"[+-]?\d+(?:\.\d+)?%?", row["value"])
         if numeric and not any(Decimal(row["value"].rstrip("%")) in {
             Decimal(number) for number in re.findall(r"(?<![\d.])[+-]?\d+(?:\.\d+)?(?![\d.])", line)
@@ -207,3 +223,14 @@ def validate_teacher_answer(answer: str, scope: dict | None):
             raise ResearchAgentError("模型遗漏了原表数值或来源对应关系，未展示回答。")
         if not numeric and not any(normalized(row["value"]) in normalized(line) for line in lines):
             raise ResearchAgentError("模型改写或遗漏了原单元格的复合值，未展示回答。")
+        if numeric and row.get("unit"):
+            unit = normalized(row["unit"])
+            def normalized_units(content):
+                content = normalized(content).replace("**", "").replace("|", " ")
+                for old, new in (("公斤", "kg"), ("千克", "kg"), ("厘米", "cm"), ("毫米", "mm"), ("克", "g")):
+                    content = content.replace(old, new)
+                return content
+            pairs = [Decimal(number) for line in lines for number in re.findall(
+                rf"([+-]?\d+(?:\.\d+)?)\s*{re.escape(unit)}(?![a-z/])", normalized_units(line))]
+            if Decimal(row["value"].rstrip("%")) not in pairs:
+                raise ResearchAgentError("模型未保留原表的完整单位或计量口径，未展示回答。")

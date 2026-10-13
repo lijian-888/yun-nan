@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from unittest.mock import AsyncMock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -13,7 +14,7 @@ from app.ai_gateway import AIProviderSettings
 from app.research_agent import ResearchAgentError
 from app.teacher_file_query import TeacherFileQuery, query_teacher_records, evidence_for_result, validate_teacher_answer, build_teacher_file_evidence
 from app.teacher_source_files import create_teacher_source_files_router
-from app.teacher_workbook_index import build_index, metric_code
+from app.teacher_workbook_index import build_index, metric_code, _unit
 from app.teacher_workbook_reader import _number_text
 
 
@@ -171,3 +172,20 @@ class TeacherFileQueryTests(unittest.TestCase):
         self.assertFalse(states[-1]["allow_skip"])
         confirmed = self.query(material="UNC1", metric="穗长", confirm_identity=True, sheet="无标题材料列", cell="B2")
         self.assertEqual(confirmed["records"][0]["value"], "23")
+
+    def test_planner_retries_once_without_guessed_parameters(self):
+        provider = AIProviderSettings("cherryin", "https://example.invalid", "model", "test", True)
+        planner = AsyncMock(side_effect=[ResearchAgentError("JSON failed"), {"material":"DT10","metric":"株高","year":2023}])
+        with patch.dict("os.environ", {"ALLOW_SHARED_BUSINESS_EGRESS":"true","YNAAS_TEACHER_FILES_DIR":str(self.root),"YNAAS_TEACHER_INDEX_PATH":str(self.index)}), patch("app.teacher_file_query.model_json_request", planner):
+            _, _, states = asyncio.run(build_teacher_file_evidence(provider=provider,question="DT10在2023年的株高",history=[]))
+        self.assertEqual(planner.await_count, 2)
+        self.assertEqual(states[1]["records"][0]["value"], "108")
+
+    def test_single_source_citation_and_per_area_unit(self):
+        self.assertEqual(_unit("试验面积（亩）", "0.04"), "亩")
+        self.assertEqual(_unit("浓度（mg/kg）", "1.2"), "mg/kg")
+        self.assertEqual(_unit("面积（m²）", "20"), "m2")
+        scope={"status":"found","records":[{"value":"600","display_value":"600 kg/亩","unit":"kg/亩","status":"source_value","citation":"【原表1】"}]}
+        validate_teacher_answer("产量600公斤/亩。\n来源：【原表1】",scope)
+        with self.assertRaises(ResearchAgentError):
+            validate_teacher_answer("产量600公斤。【原表1】",scope)
