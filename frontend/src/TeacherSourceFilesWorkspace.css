@@ -37,6 +37,10 @@
 .teacher-file-cell-value > span { flex: none; min-width: 64px; color: #66877b; }
 .teacher-file-cell-value > div { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .teacher-file-grid-scroll { position: relative; min-height: 120px; flex: 1; overflow: scroll; overscroll-behavior: contain; border: 1px solid #dce9e2; outline-color: #18785e; }
+.teacher-file-grid-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+.teacher-file-grid-scroll::-webkit-scrollbar-track, .teacher-file-grid-scroll::-webkit-scrollbar-corner { background: #f0f5f2; }
+.teacher-file-grid-scroll::-webkit-scrollbar-thumb { border: 2px solid #f0f5f2; border-radius: 6px; background: #8cae9e; }
+.teacher-file-grid-scroll::-webkit-scrollbar-thumb:hover { background: #668b78; }
 .teacher-file-grid-canvas { position: relative; min-width: 100%; font-size: 12px; }
 .teacher-file-grid-header { position: sticky; top: 0; z-index: 3; background: #edf6f1; }
 .teacher-file-grid-row { position: absolute; left: 0; }
