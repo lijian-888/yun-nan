@@ -14,7 +14,8 @@ from fastapi.responses import FileResponse
 
 
 TEACHER_FOLDERS = ("黄平老师", "寇老师", "刘慰华老师", "袁老师")
-PREVIEW_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt"}
+INLINE_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt"}
+PREVIEW_SUFFIXES = INLINE_SUFFIXES | {".xlsx", ".xls", ".csv", ".tsv"}
 
 
 def _root() -> Path:
@@ -93,7 +94,7 @@ def create_teacher_source_files_router(require_user) -> APIRouter:
     @router.get("/file")
     def original_file(path: str = Query(max_length=1024)):
         target = _resolve(_root(), path, file_only=True)
-        preview = target.suffix.lower() in PREVIEW_SUFFIXES
+        preview = target.suffix.lower() in INLINE_SUFFIXES
         media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         return FileResponse(
             target,

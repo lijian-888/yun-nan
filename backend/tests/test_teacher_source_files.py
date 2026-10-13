@@ -18,6 +18,7 @@ class TeacherSourceFilesTests(unittest.TestCase):
         nested = teacher / "2025年"
         nested.mkdir(parents=True)
         (nested / "原始记录.xlsx").write_bytes(b"spreadsheet")
+        (nested / "旧版记录.xls").write_bytes(b"legacy")
         (teacher / "照片.jpg").write_bytes(b"image")
         (self.root / "outputs").mkdir()
         (self.root / "outputs" / "private.txt").write_text("excluded")
@@ -36,9 +37,11 @@ class TeacherSourceFilesTests(unittest.TestCase):
         self.assertEqual(root.status_code, 200)
         self.assertEqual([item["name"] for item in root.json()["entries"]], ["黄平老师"])
         listing = self.client.get("/api/research/teacher-source-files/browse", params={"path": "黄平老师/2025年"})
-        item = listing.json()["entries"][0]
+        item = next(item for item in listing.json()["entries"] if item["name"] == "原始记录.xlsx")
         self.assertEqual(item["name"], "原始记录.xlsx")
         self.assertEqual(item["size_bytes"], len(b"spreadsheet"))
+        self.assertTrue(item["can_preview"])
+        self.assertTrue(next(item for item in listing.json()["entries"] if item["name"] == "旧版记录.xls")["can_preview"])
         self.assertNotIn("spreadsheet", str(listing.json()))
 
     def test_download_and_inline_preview(self):

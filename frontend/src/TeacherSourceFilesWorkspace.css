@@ -14,5 +14,31 @@
 .teacher-files-table-scroll td:first-child { max-width: 520px; overflow-wrap: anywhere; }
 .teacher-files-name, .teacher-files-action { display: inline-flex; align-items: center; gap: 7px; border: 0; padding: 2px; color: #176853; background: none; cursor: pointer; text-align: left; }
 .teacher-files-action { white-space: nowrap; }
+.teacher-files-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
 .teacher-files-note { margin: 14px 0 0; }
-@media (max-width: 760px) { .teacher-files-toolbar { flex-wrap: wrap; } .teacher-files-toolbar label { flex-basis: 100%; } }
+.teacher-file-preview { width: min(1380px, calc(100vw - 32px)); height: min(850px, calc(100dvh - 32px)); max-width: none; max-height: none; padding: 0; border: 1px solid #b3d2c3; border-radius: 10px; color: #17463c; }
+.teacher-file-preview[open] { display: flex; flex-direction: column; }
+.teacher-file-preview::backdrop { background: #06271fa8; }
+.teacher-file-preview-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid #dce9e2; }
+.teacher-file-preview-header h2 { margin: 0 0 4px; font-size: 18px; overflow-wrap: anywhere; }
+.teacher-file-preview-header p { margin: 0; }
+.teacher-file-preview-header > div:last-child { display: flex; flex: none; gap: 8px; }
+.teacher-file-preview-body { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 12px 20px 20px; overflow: auto; }
+.teacher-file-preview-body > p[role=status] { display: flex; align-items: center; gap: 8px; }
+.teacher-file-preview-image { display: block; max-width: 100%; max-height: 100%; margin: auto; object-fit: contain; }
+.teacher-file-preview-frame { width: 100%; flex: 1; min-height: 400px; border: 0; }
+.teacher-file-preview-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.teacher-file-sheet-tabs { display: flex; flex: none; gap: 6px; overflow-x: auto; padding-bottom: 8px; }
+.teacher-file-sheet-tabs button { flex: none; padding: 7px 12px; border: 1px solid #b9d5c9; border-radius: 5px; color: #176853; background: #f6faf8; }
+.teacher-file-sheet-tabs button[aria-pressed=true] { color: #fff; background: #18785e; }
+.teacher-file-preview-pagebar { display: flex; flex: none; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 7px 0 12px; font-size: 13px; }
+.teacher-file-preview-pagebar > div { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.teacher-file-preview-pagebar button { padding: 5px 8px; border: 1px solid #b9d5c9; border-radius: 4px; color: #176853; background: #fff; }
+.teacher-file-preview-pagebar button:disabled { opacity: .45; cursor: default; }
+.teacher-file-grid-scroll { min-height: 0; flex: 1; overflow: auto; border: 1px solid #dce9e2; }
+.teacher-files .teacher-file-grid { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.teacher-files .teacher-file-grid th, .teacher-files .teacher-file-grid td { min-width: 110px; max-width: 320px; padding: 7px 9px; border: 0; border-right: 1px solid #e4eee9; border-bottom: 1px solid #e4eee9; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.teacher-files .teacher-file-grid thead th { position: sticky; top: 0; z-index: 2; background: #edf6f1; }
+.teacher-files .teacher-file-grid th:first-child { position: sticky; left: 0; z-index: 1; min-width: 50px; background: #f2f8f5; text-align: right; }
+.teacher-files .teacher-file-grid thead th:first-child { z-index: 3; }
+@media (max-width: 760px) { .teacher-files-toolbar { flex-wrap: wrap; } .teacher-files-toolbar label { flex-basis: 100%; } .teacher-file-preview-header { align-items: flex-start; flex-wrap: wrap; } .teacher-file-preview-header > div:last-child { width: 100%; justify-content: space-between; } .teacher-file-preview-body { padding: 10px; } }
