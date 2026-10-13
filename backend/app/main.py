@@ -155,6 +155,8 @@ from .business_data_query import DataQuery, BusinessQueryError, load_business_ca
 from .variety_search import create_variety_search_router
 from .pedigree_graph import create_pedigree_router
 from .teacher_source_files import create_teacher_source_files_router
+from .teacher_file_query import build_teacher_file_evidence, validate_teacher_answer
+from .teacher_workbook_index import index_summary as teacher_index_summary
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
 from .research_search import build_public_web_context, needs_current_public_search, requested_public_pages, resolve_public_request, search_public_references
 from .ynaas_reference import build_ynaas_database_evidence, ensure_reference_read_access
@@ -6231,9 +6233,22 @@ async def build_dialogue_evidence(
                 "supported_operations": ["按业务表/视图查询", "按字段筛选", "按明确身份键关联", "按用户要求统计或分组"],
                 "limits": ["只读取已有评价结果，不代表已经验证评分科学性", "空表和缺失指标不得补造",
                            "导入、治理和质量管理记录仅管理员可查", "认证、私人会话和附件不在业务目录"]}, ensure_ascii=False)
+        try:
+            teacher_catalog = teacher_index_summary()
+            context += "\n老师共享原始表格已接入单元格查询：" + json.dumps(teacher_catalog, ensure_ascii=False)
+            context += "\n支持材料、年份、指标和原文件定位；多记录需明确范围；非表格文件和无法识别表头的区域不构成已核验数值覆盖。"
+        except (ValueError, OSError):
+            context += "\n老师原始文件数值检索当前尚未就绪，不能承诺已能查询所有原文件指标。"
         return context, cards, []
     if plan.intent == "general":
         return "本轮是知识、方法、写作或交流问题，没有执行品种事实查询。直接回答用户的问题；一般知识不要冒充本地实测数据。", [], []
+    if plan.intent == "teacher_file":
+        prior_query = next((state.get("query") for item in history
+            for state in (getattr(item, "operation_state", None) or [])
+            if state.get("state") == "teacher_file_context"), None)
+        return await build_teacher_file_evidence(provider=provider, question=question,
+            history=model_history, prior_query=prior_query, skipped=skipped,
+            original_question=original_question, attempt=clarification_attempt)
     if plan.intent == "variety_fact":
         result = lookup_local_variety_data(session, question, history,
             institute_enabled=LOCAL_INSTITUTE_QUERY_ENABLED, variety_id=variety_id, selected_by_model=True)
@@ -7442,13 +7457,16 @@ async def research_chat_stream(
             yield sse_event("status", {"label": "正在由模型理解问题和会话上下文", "task_id": ai_task_id})
             dialogue_plan = await plan_dialogue(provider=selected_provider, question=safe_user_prompt,
                                                 history=safe_conversation_history)
+            if payload.clarification_action and marker.get("kind") == "teacher_file":
+                dialogue_plan = dialogue_plan.model_copy(update={"intent": "teacher_file", "source": "institute",
+                    "needs_web": False, "web_question": "", "web_query": ""})
             _raise_if_ai_task_cancelled(ai_task_id)
             async for pause_event in _ai_pause_events(ai_task_id):
                 yield pause_event
             _update_ai_task(ai_task_id, status="running", action="dialogue_planned",
                             metadata=dialogue_plan.model_dump())
             yield sse_event("status", {"label": {"capabilities": "正在核对数据来源与可用功能",
-                "variety_fact": "正在查询对应品种及审定记录", "reference": "正在检索相关基因或系谱证据",
+                "variety_fact": "正在查询对应品种及审定记录", "teacher_file": "正在检索老师原始表格并核对单元格", "reference": "正在检索相关基因或系谱证据",
                 "research_task": "正在核对研究条件与相关证据", "database": "正在规划并核验服务器业务数据查询",
                 "general": "正在准备回答"}[dialogue_plan.intent]})
             with SessionLocal() as query_session:
@@ -7566,7 +7584,7 @@ async def research_chat_stream(
                 if result["type"] == "token":
                     # Measured facts are released only after numerical evidence
                     # validation; do not briefly show an invented value then retract it.
-                    if dialogue_plan.intent in {"variety_fact", "database"}:
+                    if dialogue_plan.intent in {"variety_fact", "teacher_file", "database"}:
                         continue
                     if not model_answer_started:
                         model_answer_started = True
@@ -7579,6 +7597,9 @@ async def research_chat_stream(
                     validate_fact_measurements(result["content"], safe_dialogue.texts[0])
                     validate_scoped_fact_answer(result["content"], next(
                         (state for state in dialogue_states if state.get("state") == "numeric_fact_scope"), None))
+                elif dialogue_plan.intent == "teacher_file":
+                    validate_teacher_answer(result["content"], next(
+                        (state for state in dialogue_states if state.get("state") == "teacher_file_fact_scope"), None))
                 elif dialogue_plan.intent == "database":
                     result["content"] = polish_business_answer(result["content"], payload.content.strip())
                 async for pause_event in _ai_pause_events(ai_task_id):

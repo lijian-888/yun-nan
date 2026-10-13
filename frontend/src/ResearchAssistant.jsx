@@ -41,6 +41,7 @@ import BreedingIntelligenceWorkspace from "./BreedingIntelligenceWorkspace";
 import TrialAnalysisWorkspace from "./TrialAnalysisWorkspace";
 import VarietySearchWorkspace from "./VarietySearchWorkspace";
 import PedigreeWorkspace from "./PedigreeWorkspace";
+import TeacherSourceFilesWorkspace from "./TeacherSourceFilesWorkspace";
 
 const AGENT_NAME = "隆耘 Agent 育种智能体";
 
@@ -162,6 +163,7 @@ export default function ResearchAssistant({ platformContext }) {
   const [pauseChanging, setPauseChanging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [sourceFileLocation, setSourceFileLocation] = useState(null);
   const [imagePreviewUrls, setImagePreviewUrls] = useState({});
   const [pendingImages, setPendingImages] = useState([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -727,11 +729,11 @@ export default function ResearchAssistant({ platformContext }) {
                     event.preventDefault();
                     submitClarification(message.id, "answer");
                   }
-                }} placeholder={clarification.kind === "local_data" ? "例如：2000 年广西审定；或输入完整品种名称" : "填写补充条件；不确定时可跳过"} disabled={sending} />
-                <div className="assistant-clarification-actions"><span>{clarification.allow_skip === false ? "请先确认材料身份；也可以填写完整名称或编号。" : clarification.kind === "local_data" ? "可填写省份、年份或审定编号；查看全部会按记录分别展示。" : "可只回答知道的部分；不确定时可跳过。"}</span>{clarification.allow_skip !== false && <button type="button" className="secondary-button" onClick={() => submitClarification(message.id, "skip")} disabled={sending}>{clarification.kind === "local_data" ? "查看全部" : "跳过"}</button>}<button type="button" className="primary-button" onClick={() => submitClarification(message.id, "answer")} disabled={sending || !clarificationDraft.trim()}><SendHorizontal size={15} />补充并继续</button></div>
+                }} placeholder={clarification.kind === "teacher_file" ? "例如：2023年、黄平老师、某个文件或工作表、具体测量次数" : clarification.kind === "local_data" ? "例如：2000 年广西审定；或输入完整品种名称" : "填写补充条件；不确定时可跳过"} disabled={sending} />
+                <div className="assistant-clarification-actions"><span>{clarification.kind === "teacher_file" ? "请确认原始记录范围；查看全部时会逐条列出，不自动取平均。" : clarification.allow_skip === false ? "请先确认材料身份；也可以填写完整名称或编号。" : clarification.kind === "local_data" ? "可填写省份、年份或审定编号；查看全部会按记录分别展示。" : "可只回答知道的部分；不确定时可跳过。"}</span>{clarification.allow_skip !== false && <button type="button" className="secondary-button" onClick={() => submitClarification(message.id, "skip")} disabled={sending}>{["local_data", "teacher_file"].includes(clarification.kind) ? "查看全部" : "跳过"}</button>}<button type="button" className="primary-button" onClick={() => submitClarification(message.id, "answer")} disabled={sending || !clarificationDraft.trim()}><SendHorizontal size={15} />补充并继续</button></div>
               </section>}
               {message.role === "assistant" && message.report_available && <ReportDownloadCard message={message} onDownload={() => downloadResearchReport(message.id)} />}
-              {sourceEvidence.length > 0 && <details className="evidence-card"><summary>{sourceEvidence.some((item) => item.excerpts?.length) ? "查看原文与来源" : "证据与数据来源"} <ChevronDown size={15} /></summary>{sourceEvidence.map((item, index) => <div className="evidence-item" key={`${item.type}-${index}`}><strong>{index + 1}. {item.title}</strong><span>{item.detail}</span>{Array.isArray(item.excerpts) && item.excerpts.map((excerpt, excerptIndex) => <section className="evidence-original" key={excerptIndex}><h5>{excerpt.title}</h5><p>{excerpt.text}</p></section>)}{item.query_template && <span>受控查询模板：{item.query_template}</span>}{item.query_parameters && <span>已验证参数：{JSON.stringify(item.query_parameters)}</span>}{item.query_planner && <span>参数解析方式：{item.query_planner}</span>}{item.url && <a href={item.url} target="_blank" rel="noreferrer">查看来源网页</a>}</div>)}</details>}
+              {sourceEvidence.length > 0 && <details className="evidence-card"><summary>{sourceEvidence.some((item) => item.excerpts?.length) ? "查看原文与来源" : "证据与数据来源"} <ChevronDown size={15} /></summary>{sourceEvidence.map((item, index) => <div className="evidence-item" key={`${item.type}-${index}`}><strong>{index + 1}. {item.title}</strong><span>{item.detail}</span>{Array.isArray(item.excerpts) && item.excerpts.map((excerpt, excerptIndex) => <section className="evidence-original" key={excerptIndex}><h5>{excerpt.title}</h5><p>{excerpt.text}</p></section>)}{item.source_location && <button type="button" className="secondary-button" onClick={() => setSourceFileLocation(item.source_location)}>查看原表并定位 {item.source_location.cell}</button>}{item.query_template && <span>受控查询模板：{item.query_template}</span>}{item.query_parameters && <span>已验证参数：{JSON.stringify(item.query_parameters)}</span>}{item.query_planner && <span>参数解析方式：{item.query_planner}</span>}{item.url && <a href={item.url} target="_blank" rel="noreferrer">查看来源网页</a>}</div>)}</details>}
             </div>
           </article>;
         })}
@@ -767,5 +769,6 @@ export default function ResearchAssistant({ platformContext }) {
     </main>
 
     {preview && <div className="attachment-preview-backdrop" onMouseDown={() => setPreview(null)}><section className={`attachment-preview ${preview.image_url ? "image-preview" : ""}`} onMouseDown={(event) => event.stopPropagation()}><header><div><p>{preview.image_url ? "当前会话私有原图" : "本地解析文字预览"}</p><h2>{preview.file_name}</h2></div><button className="icon-button" title="关闭预览" onClick={() => setPreview(null)}><X size={17} /></button></header>{preview.parser_warnings?.map((warning) => <div className="preview-warning" key={warning}>{warning}</div>)}{preview.image_url ? <div className="attachment-image-full"><img src={preview.image_url} alt={preview.file_name} /></div> : <pre>{preview.preview || "该附件未解析出可预览文本。"}</pre>}{preview.preview_truncated && <small>预览仅显示前 60,000 个字符；完整文本仍仅保存在当前会话的私有附件中。</small>}</section></div>}
+    {sourceFileLocation && <TeacherSourceFilesWorkspace previewOnly initialLocation={sourceFileLocation} onPreviewClose={() => setSourceFileLocation(null)} />}
   </div>;
 }

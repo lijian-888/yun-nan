@@ -13,7 +13,7 @@ const formatSize = bytes => bytes == null ? "—" : bytes < 1024 ? `${bytes} B` 
 const formatDate = value => value ? new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 
 async function fileResponse(item, signal) {
-  const response = await authorizedFetch(`${apiBase}/file?path=${encodeURIComponent(item.path)}`, { signal });
+  const response = await authorizedFetch(`${apiBase}/file?path=${encodeURIComponent(item.path)}${item.expectedHash ? `&expected_sha256=${item.expectedHash}` : ""}`, { signal });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.detail || "原始文件读取失败。");
@@ -21,7 +21,7 @@ async function fileResponse(item, signal) {
   return response;
 }
 
-export default function TeacherSourceFilesWorkspace() {
+export default function TeacherSourceFilesWorkspace({ initialLocation = null, previewOnly = false, onPreviewClose }) {
   const [path, setPath] = useState("");
   const [listing, setListing] = useState(null);
   const [filter, setFilter] = useState("");
@@ -38,6 +38,7 @@ export default function TeacherSourceFilesWorkspace() {
   const previewTitleId = useId();
 
   useEffect(() => {
+    if (previewOnly) return;
     const controller = new AbortController();
     setBusy(true); setError(""); setListing(null); setFilter("");
     request(`${apiBase}/browse?path=${encodeURIComponent(path)}`, { signal: controller.signal })
@@ -45,7 +46,16 @@ export default function TeacherSourceFilesWorkspace() {
       .catch(e => { if (!controller.signal.aborted) setError(e.message || "文件目录读取失败。"); })
       .finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
-  }, [path]);
+  }, [path, previewOnly]);
+
+  useEffect(() => {
+    if (!initialLocation) return;
+    const controller = new AbortController();
+    request(`${apiBase}/metadata?path=${encodeURIComponent(initialLocation.path)}${initialLocation.sha256 ? `&expected_sha256=${initialLocation.sha256}` : ""}`, { signal: controller.signal })
+      .then(item => { if (!controller.signal.aborted) void openPreview({ ...item, expectedHash: initialLocation.sha256 }, initialLocation); })
+      .catch(e => { if (!controller.signal.aborted) setError(e.message || "来源文件打开失败。"); });
+    return () => controller.abort();
+  }, [initialLocation]);
 
   useEffect(() => {
     if (preview && !previewDialog.current?.open) previewDialog.current?.showModal();
@@ -66,9 +76,10 @@ export default function TeacherSourceFilesWorkspace() {
     previewUrl.current = "";
     setPreview(null); setOpening(""); setDownloadError("");
     setSheetIndex(0);
+    onPreviewClose?.();
   }
 
-  async function openPreview(item) {
+  async function openPreview(item, location = null) {
     if (opening) return;
     previewController.current?.abort();
     const controller = new AbortController();
@@ -84,7 +95,13 @@ export default function TeacherSourceFilesWorkspace() {
       const response = await fileResponse(item, controller.signal);
       if (workbookExtensions.has(item.extension)) {
         const bytes = await response.arrayBuffer();
-        if (!controller.signal.aborted) setPreview({ item, kind: "workbook", workbook: readWorkbook(bytes) });
+        if (!controller.signal.aborted) {
+          const workbook = readWorkbook(bytes);
+          const index = location ? workbook.SheetNames.indexOf(location.sheet) : 0;
+          if (index < 0) throw new Error("原文件中已找不到对应工作表，请重新核验来源。");
+          setSheetIndex(index);
+          setPreview({ item, kind: "workbook", workbook, location });
+        }
       } else if (item.extension === ".txt") {
         const content = await response.text();
         if (!controller.signal.aborted) setPreview({ item, kind: "text", content });
@@ -124,7 +141,8 @@ export default function TeacherSourceFilesWorkspace() {
   const ancestors = path ? path.split("/") : [];
   const visible = (listing?.entries || []).filter(item => item.name.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()));
 
-  return <section className="teacher-files">
+  return <section className={`teacher-files${previewOnly ? " teacher-files-preview-only" : ""}`}>
+    {!previewOnly && <>
     <div className="teacher-files-intro"><h3>院内原始文件</h3><p>按老师文件夹浏览原始资料。点击文件名可在站内预览；原文件保持只读。</p></div>
     <nav className="teacher-files-crumbs" aria-label="文件目录位置"><button type="button" onClick={() => setPath("")}>老师数据</button>{ancestors.map((name, index) => <span key={`${name}-${index}`}> / <button type="button" onClick={() => setPath(ancestors.slice(0, index + 1).join("/"))}>{name}</button></span>)}</nav>
     <div className="teacher-files-toolbar"><label><Search size={16} /><input aria-label="筛选当前目录文件" placeholder="筛选当前目录中的文件或文件夹" value={filter} onChange={e => setFilter(e.target.value)} /></label>{path && <button className="secondary-button" type="button" onClick={() => setPath(ancestors.slice(0, -1).join("/"))}><ArrowLeft size={15} />返回上一级</button>}</div>
@@ -132,6 +150,8 @@ export default function TeacherSourceFilesWorkspace() {
     {busy && <p role="status"><LoaderCircle className="spin" size={16} />正在读取文件目录…</p>}
     {listing && <><p className="teacher-files-count">当前目录 {listing.entries.length} 项{filter && `，筛选后 ${visible.length} 项`}</p><div className="teacher-files-table-scroll"><table><thead><tr><th>名称</th><th>类型</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead><tbody>{visible.map(item => <tr key={item.path}><td><button className="teacher-files-name" type="button" onClick={() => item.kind === "folder" ? setPath(item.path) : openPreview(item)}>{item.kind === "folder" ? <Folder size={17} /> : <FileText size={17} />}{item.name}</button></td><td>{item.kind === "folder" ? "文件夹" : (item.extension || "文件").replace(/^\./, "").toUpperCase()}</td><td>{formatSize(item.size_bytes)}</td><td>{formatDate(item.modified_at)}</td><td><div className="teacher-files-actions"><button className="teacher-files-action" type="button" disabled={opening === item.path} onClick={() => item.kind === "folder" ? setPath(item.path) : openPreview(item)}>{item.kind === "folder" ? "进入" : opening === item.path ? <LoaderCircle className="spin" size={15} /> : "预览"}</button>{item.kind === "file" && <button className="teacher-files-action" type="button" disabled={downloading === item.path} onClick={() => downloadFile(item)}>{downloading === item.path ? <LoaderCircle className="spin" size={15} /> : <Download size={14} />}下载</button>}</div></td></tr>)}{!visible.length && <tr><td colSpan={5}>当前目录没有符合条件的文件。</td></tr>}</tbody></table></div><p className="teacher-files-note">Excel 工作表、图片、PDF 和文本可在站内查看。预览只读取原文件，不修改内容；复杂格式、图表及公式计算以原文件为准。Word 文档暂需下载查看。</p></>}
 
+    </>}
+    {previewOnly && error && <p className="vs-error" role="alert">{error}<button type="button" onClick={() => onPreviewClose?.()}>关闭</button></p>}
     <dialog ref={previewDialog} className="teacher-file-preview" aria-labelledby={previewTitleId} onClose={onPreviewClosed}>
       {preview && <><header className="teacher-file-preview-header"><div><h2 id={previewTitleId}>{preview.item.name}</h2><p>{formatSize(preview.item.size_bytes)} · {formatDate(preview.item.modified_at)} · 只读预览</p></div><div><button className="secondary-button" type="button" onClick={() => downloadFile(preview.item)} disabled={!!downloading}><Download size={15} />下载原文件</button><button className="secondary-button" type="button" aria-label="关闭预览" onClick={closePreview}><X size={17} /></button></div></header>
         <div className="teacher-file-preview-body">
@@ -142,7 +162,7 @@ export default function TeacherSourceFilesWorkspace() {
           {preview.kind === "pdf" && <iframe className="teacher-file-preview-frame" src={preview.url} title={preview.item.name} />}
           {preview.kind === "text" && <pre className="teacher-file-preview-text">{preview.content}</pre>}
           {preview.kind === "workbook" && <><nav className="teacher-file-sheet-tabs" aria-label="工作表">{preview.workbook.SheetNames.map((name, index) => <button type="button" key={`${name}-${index}`} aria-pressed={index === sheetIndex} onClick={() => setSheetIndex(index)}>{name}</button>)}</nav>
-            <TeacherWorkbookGrid key={sheetIndex} workbook={preview.workbook} sheetName={preview.workbook.SheetNames[sheetIndex]} />
+            <TeacherWorkbookGrid key={sheetIndex} workbook={preview.workbook} sheetName={preview.workbook.SheetNames[sheetIndex]} initialCell={preview.location?.sheet === preview.workbook.SheetNames[sheetIndex] ? preview.location.cell : null} />
           </>}
         </div>
       </>}

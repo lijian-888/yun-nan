@@ -3,11 +3,24 @@ import { cellText, sheetDetails, visibleSheetWindow } from "./teacherWorkbookPre
 
 const geometry = { rowHeight: 36, columnWidth: 180, headerHeight: 36, rowNumberWidth: 60, overscan: 4 };
 
-export default function TeacherWorkbookGrid({ workbook, sheetName }) {
+export default function TeacherWorkbookGrid({ workbook, sheetName, initialCell = null }) {
   const details = useMemo(() => sheetDetails(workbook, sheetName), [workbook, sheetName]);
   const scroller = useRef(null);
   const [viewport, setViewport] = useState({ top: 0, left: 0, width: 1200, height: 600 });
   const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    if (!initialCell || !scroller.current) return;
+    const match = /^([A-Z]{1,3})([1-9][0-9]*)$/.exec(initialCell);
+    if (!match) return;
+    const row = Number(match[2]) - 1;
+    const column = [...match[1]].reduce((value, letter) => value * 26 + letter.charCodeAt(0) - 64, 0) - 1;
+    if (row >= details.totalRows || column >= details.totalColumns) return;
+    setSelected({ address: initialCell, value: cellText(details.sheet, row, column) });
+    const element = scroller.current;
+    element.scrollTop = Math.max(0, geometry.headerHeight + row * geometry.rowHeight - element.clientHeight / 2);
+    element.scrollLeft = Math.max(0, geometry.rowNumberWidth + column * geometry.columnWidth - element.clientWidth / 2);
+  }, [details, initialCell]);
 
   useEffect(() => {
     const element = scroller.current;

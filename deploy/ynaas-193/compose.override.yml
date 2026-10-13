@@ -29,6 +29,7 @@ services:
       ALLOW_SHARED_BUSINESS_EGRESS: "true"
       DEMO_DATA_ENABLED: "false"
       YNAAS_TEACHER_FILES_DIR: /data/teacher-source-files
+      YNAAS_TEACHER_INDEX_PATH: /data/research/teacher-source-index.sqlite
     volumes:
       # Copy of the four teacher folders from 老师数据/云南农科院数据; read-only in the API.
       - /home/lijian/apps/ynaas-trial-teacher-files-20261013:/data/teacher-source-files:ro

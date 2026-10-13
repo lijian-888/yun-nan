@@ -5,6 +5,7 @@ Only authenticated users can list metadata or request an individual original.
 """
 
 import mimetypes
+import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -66,6 +67,14 @@ def _entry(path: Path, root: Path) -> dict:
     }
 
 
+def _check_source_version(path: Path, expected: str):
+    if expected:
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if digest != expected:
+            raise HTTPException(409, "原文件已更新，与回答时的来源版本不一致，请重新查询后查看。")
+
+
 def browse_source_files(relative: str = "") -> dict:
     root = _root()
     if relative:
@@ -92,8 +101,9 @@ def create_teacher_source_files_router(require_user) -> APIRouter:
         return browse_source_files(path)
 
     @router.get("/file")
-    def original_file(path: str = Query(max_length=1024)):
+    def original_file(path: str = Query(max_length=1024), expected_sha256: str = Query(default="", pattern=r"^(?:[0-9a-f]{64})?$")):
         target = _resolve(_root(), path, file_only=True)
+        _check_source_version(target, expected_sha256)
         preview = target.suffix.lower() in INLINE_SUFFIXES
         media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         return FileResponse(
@@ -103,5 +113,29 @@ def create_teacher_source_files_router(require_user) -> APIRouter:
             content_disposition_type="inline" if preview else "attachment",
             headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
         )
+
+    @router.get("/metadata")
+    def metadata(path: str = Query(max_length=1024), expected_sha256: str = Query(default="", pattern=r"^(?:[0-9a-f]{64})?$")):
+        root = _root()
+        target = _resolve(root, path, file_only=True)
+        _check_source_version(target, expected_sha256)
+        return _entry(target, root)
+
+    from .teacher_file_query import TeacherFileQuery, query_teacher_records
+    from .teacher_workbook_index import index_summary
+
+    @router.get("/catalog")
+    def catalog():
+        try:
+            return index_summary()
+        except (ValueError, OSError) as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @router.post("/query")
+    def query(payload: TeacherFileQuery):
+        try:
+            return query_teacher_records(payload)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(503, str(exc)) from exc
 
     return router

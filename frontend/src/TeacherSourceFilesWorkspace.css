@@ -1,4 +1,5 @@
 .teacher-files { border-top: 1px solid #dce9e2; padding-top: 20px; }
+.teacher-files-preview-only { border: 0; padding: 0; }
 .teacher-files-intro h3 { margin: 0 0 5px; }
 .teacher-files-intro p { margin: 0; }
 .teacher-files-crumbs { display: flex; flex-wrap: wrap; gap: 3px; margin: 18px 0; color: #66877b; font-size: 13px; }

@@ -21,7 +21,7 @@ from .research_agent import ResearchAgentError
 
 class DialoguePlan(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    intent: Literal["capabilities", "variety_fact", "reference", "research_task", "database", "general"]
+    intent: Literal["capabilities", "variety_fact", "teacher_file", "reference", "research_task", "database", "general"]
     source: Literal["public", "institute", "both", "unspecified"]
     include_counts: bool
     needs_web: bool
@@ -37,7 +37,7 @@ class DialoguePlan(BaseModel):
 
 PLANNER_CONTRACT = """你是对话意图规划器。理解本轮问题及已提供的会话上下文，只选择工作流程，不回答问题、不生成SQL。
 输出一个JSON对象，且只有六个字段：
-intent: capabilities / variety_fact / reference / research_task / database / general
+intent: capabilities / variety_fact / teacher_file / reference / research_task / database / general
 source: public / institute / both / unspecified
 include_counts: 布尔值
 needs_web: 布尔值
@@ -49,6 +49,9 @@ capabilities：仅限问整个系统的功能、数据来源、数据类别或�
 variety_fact：实际请求某个品种/材料的档案、表型、性状数值、某次审定记录；也包括沿用明确前文对象的指标或省份续问。
 具体品种名或材料编号是实体对象，不是数据来源。“有没有国稻3号的数据”“能查先农8号吗”“你有南粳9212的资料吗”均选variety_fact。
 对陌生品种名称也应交给variety_fact工具核验，而不是假定不存在或归到capabilities。
+teacher_file：查询老师共享原始Excel/CSV里的某材料、某年的实测指标；按材料编号查询年份性状、指定老师、原文件或工作表时优先此类。老师文件已有独立的原单元格索引，不需要用户先上传附件。
+例如“老师原始文件中某材料2023年的株高”“袁老师某穗号的结实率”“某材料在某年某地点的考种指标”，以及这类查询后的简短年份、指标、文件、地点续问，均选teacher_file。材料编号中带年份不表示用户指定了测量年份。
+明确查询国家水稻数据中心或省级审定记录时仍选variety_fact，不把院内实测数值当作审定值。老师文件问题不选database，不需要生成SQL。
 reference：实际查询基因、测序资料、系谱或亲缘关系。不要因用户问系统是否具备这些资料而选择此类。
 research_task：请求执行品种比较、综合评价、筛选或亲本推荐、试验分析。
 database：请求其他服务器业务表、视图、原始记录、统计、筛选、已有评价结果、基因型等数据；不局限于品种档案。查询导入/治理/质量记录也归此类，后台会校验权限。明确要求读取某个表或视图时选database。实际已有五性评分、排名或亲本推荐结果可选database，要求新制定推荐方案仍选research_task。
@@ -56,7 +59,7 @@ general：概念、原理、方法、写作、闲聊等其他问题。品种名�
 “如何评价稳产性”是general；“比较这两个品种的稳产性”是research_task。
 历史仅用于消歧，用户明确换了对象时以本轮为准；无法确认具体对象时不要猜测。
 source指用户实际要求的数据来源，不是提问者所属单位。只介绍来源也可以选择对应source。
-国家水稻数据中心/RiceData/公开审定库对应public；云南农科院/院内治理库对应institute；同时询问两者对应both；未要求来源对应unspecified。
+国家水稻数据中心/RiceData/公开审定库对应public；云南农科院/院内治理库/老师原始文件对应institute；同时询问两者对应both；未要求来源对应unspecified。
 include_counts只有用户明确问数量/记录规模时为true。needs_web只有问题需要外部最新信息或要求联网时为true；系统能力和已入库品种事实不需联网。
 先确定用户要解决的问题，再确定检索方式。用户说“上网检索”“联网搜索”“结合本地知识回答”是在说明资料获取方式，不能把这些话作为研究对象或搜索词。
 例如“水稻倒伏问题和什么有关，通过上网检索和本地知识来回答我”：web_question应为“哪些因素导致水稻倒伏，这些因素如何影响倒伏风险？”，web_query可为“水稻倒伏 原因 影响因素 栽培 品种 气象”。不要检索“和本地知识来回答我”。
@@ -148,6 +151,8 @@ def dialogue_response_guidance(plan: DialoguePlan) -> str:
         return base + "默认简洁作答；术语解释先说定义和用途，通常一个短段落足够。只有用户要求详细、步骤或对比时再展开；不要自行扩展成带标准号和分类数值的长篇报告。"
     if plan.intent == "variety_fact":
         return base + "明确指标先给对应值与审定范围；需要选择时只问这一必要问题。不要自行选择年份、省份，不补全缺失值，不更换单位，不输出与所问指标无关的性状。"
+    if plan.intent == "teacher_file":
+        return base + "按原文件单元格证据回答，每个值附对应【原表序号】。只展示所问指标，保持原单位、年份依据及来源对应。多条记录先引导选择；只有用户明确要求全部才逐条展示，不自动挑选、合并或取平均。"
     if plan.intent == "database":
         return base + ("只回答当前查询条件下已有的记录与用户指定的指标。人数或样本数按实际分组/筛选结果表述，"
                        "不从有限结果推断全库。五性缺分只能说明当前评分视图未形成对应维度的分值，不能声称原始数据库没有该项数据。"
