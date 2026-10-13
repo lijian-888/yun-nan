@@ -138,7 +138,7 @@ def evidence_for_result(result: dict, original_question: str, attempt=0):
               "source_location": {"path": row["file"], "sheet": row["sheet"], "cell": row["cell"], "sha256": row["file_hash"]},
               "excerpts": [{"title": f"原字段：{row['header']}，表头 {row['header_cell']}", "text": row["display_value"] or "（空白）"}]} for row in records]
     states = [{"state": "teacher_file_context", "query": result["query"]},
-              {"state": "teacher_file_fact_scope", "status": result["status"], "records": records}]
+              {"state": "teacher_file_fact_scope", "status": result["status"], "records": records, "query": result["query"]}]
     for match in result.get("source_matches", []):
         cards.append({"type": "teacher_source_candidate", "title": f"材料文字出现位置：{match['file']} · {match['sheet']} · {match['cell']}",
                       "detail": "此处找到了相同材料文字，但尚未核验到符合本次指标、年份和条件的数值，不能将附近数值作为回答。",
@@ -203,6 +203,13 @@ def validate_teacher_answer(answer: str, scope: dict | None):
     unit_map = {"％": "%", "厘米": "cm", "毫米": "mm", "克": "g", "公斤": "kg", "千克": "kg"}
     records = scope["records"]
     valid = [r for r in records if r["status"] in {"source_value", "formula_cached"}]
+    if not valid:
+        metric = scope.get("query", {}).get("metric")
+        aliases = [metric] if metric else list(METRICS)
+        text = answer.replace("**", "").replace("|", " ")
+        bare_value = re.compile("(?:" + "|".join(re.escape(name) for name in aliases if name) + r")\s*(?:记录|数值|值)?\s*(?:为|是|约|=|:|：)?\s*[+-]?\d+(?:\.\d+)?")
+        if bare_value.search(text):
+            raise ResearchAgentError("原表尚无已明确的可用数值，模型不应猜测指标结果。")
     if scope["status"] != "found":
         if measure.search(answer):
             raise ResearchAgentError("原文件查询尚未明确，模型不应给出指标数值。")

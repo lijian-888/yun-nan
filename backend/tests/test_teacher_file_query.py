@@ -76,6 +76,8 @@ class TeacherFileQueryTests(unittest.TestCase):
         self.assertEqual(cards, [])
         with self.assertRaises(ResearchAgentError):
             validate_teacher_answer("按第一条株高96cm", states[1])
+        with self.assertRaises(ResearchAgentError):
+            validate_teacher_answer("株高记录为100，选这条就好。", states[1])
 
     def test_repeat_filter_cell_selection_and_all_do_not_average(self):
         first = self.query(material="DT1", metric="株高", year=2023, conditions={"重复": "Ⅰ"})
