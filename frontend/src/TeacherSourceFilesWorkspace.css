@@ -31,14 +31,20 @@
 .teacher-file-sheet-tabs { display: flex; flex: none; gap: 6px; overflow-x: auto; padding-bottom: 8px; }
 .teacher-file-sheet-tabs button { flex: none; padding: 7px 12px; border: 1px solid #b9d5c9; border-radius: 5px; color: #176853; background: #f6faf8; }
 .teacher-file-sheet-tabs button[aria-pressed=true] { color: #fff; background: #18785e; }
-.teacher-file-preview-pagebar { display: flex; flex: none; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 7px 0 12px; font-size: 13px; }
-.teacher-file-preview-pagebar > div { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
-.teacher-file-preview-pagebar button { padding: 5px 8px; border: 1px solid #b9d5c9; border-radius: 4px; color: #176853; background: #fff; }
-.teacher-file-preview-pagebar button:disabled { opacity: .45; cursor: default; }
-.teacher-file-grid-scroll { min-height: 0; flex: 1; overflow: auto; border: 1px solid #dce9e2; }
-.teacher-files .teacher-file-grid { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
-.teacher-files .teacher-file-grid th, .teacher-files .teacher-file-grid td { min-width: 110px; max-width: 320px; padding: 7px 9px; border: 0; border-right: 1px solid #e4eee9; border-bottom: 1px solid #e4eee9; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
-.teacher-files .teacher-file-grid thead th { position: sticky; top: 0; z-index: 2; background: #edf6f1; }
-.teacher-files .teacher-file-grid th:first-child { position: sticky; left: 0; z-index: 1; min-width: 50px; background: #f2f8f5; text-align: right; }
-.teacher-files .teacher-file-grid thead th:first-child { z-index: 3; }
+.teacher-file-sheet-summary { display: flex; flex: none; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 7px 0 10px; font-size: 13px; }
+.teacher-file-sheet-summary span { color: #66877b; }
+.teacher-file-cell-value { display: flex; flex: none; gap: 12px; min-height: 34px; max-height: 96px; margin-bottom: 10px; padding: 7px 10px; border: 1px solid #dce9e2; background: #f8fbf9; font-size: 12px; overflow-y: auto; }
+.teacher-file-cell-value > span { flex: none; min-width: 64px; color: #66877b; }
+.teacher-file-cell-value > div { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.teacher-file-grid-scroll { position: relative; min-height: 120px; flex: 1; overflow: scroll; overscroll-behavior: contain; border: 1px solid #dce9e2; outline-color: #18785e; }
+.teacher-file-grid-canvas { position: relative; min-width: 100%; font-size: 12px; }
+.teacher-file-grid-header { position: sticky; top: 0; z-index: 3; background: #edf6f1; }
+.teacher-file-grid-row { position: absolute; left: 0; }
+.teacher-file-grid-heading, .teacher-file-grid-cell { position: absolute; top: 0; height: 100%; box-sizing: border-box; padding: 8px 9px; border-right: 1px solid #e4eee9; border-bottom: 1px solid #e4eee9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.teacher-file-grid-heading { font-weight: 600; }
+.teacher-file-grid-cell { background: #fff; cursor: cell; }
+.teacher-file-grid-cell.is-selected, .teacher-file-grid-cell:focus { outline: 2px solid #18785e; outline-offset: -2px; background: #f1faf5; }
+.teacher-file-grid-row-number, .teacher-file-grid-corner { position: sticky; left: 0; z-index: 2; height: 100%; box-sizing: border-box; padding: 8px 9px; border-right: 1px solid #d2e2da; border-bottom: 1px solid #e4eee9; background: #f2f8f5; text-align: right; font-weight: 600; }
+.teacher-file-grid-corner { z-index: 4; background: #edf6f1; }
+.teacher-file-empty-sheet { padding: 15px; }
 @media (max-width: 760px) { .teacher-files-toolbar { flex-wrap: wrap; } .teacher-files-toolbar label { flex-basis: 100%; } .teacher-file-preview-header { align-items: flex-start; flex-wrap: wrap; } .teacher-file-preview-header > div:last-child { width: 100%; justify-content: space-between; } .teacher-file-preview-body { padding: 10px; } }

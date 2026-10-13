@@ -1,8 +1,5 @@
 import * as XLSX from "xlsx";
 
-export const PREVIEW_ROWS = 100;
-export const PREVIEW_COLUMNS = 25;
-
 export function readWorkbook(bytes) {
   const workbook = XLSX.read(bytes, {
     type: "array",
@@ -16,30 +13,50 @@ export function readWorkbook(bytes) {
   return workbook;
 }
 
-export function sheetPage(workbook, sheetName, rowPage = 0, columnPage = 0) {
+export function sheetDetails(workbook, sheetName) {
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error("未找到该工作表。");
-  if (!sheet["!ref"]) return { rows: [], columns: [], rowPages: 1, columnPages: 1, totalRows: 0, totalColumns: 0, rowPage: 0, columnPage: 0 };
+  let lastRow = -1;
+  let lastColumn = -1;
+  const include = (cell, row, column) => {
+    if (cell && (cell.v != null && cell.v !== "" || cell.w || cell.f)) {
+      lastRow = Math.max(lastRow, row);
+      lastColumn = Math.max(lastColumn, column);
+    }
+  };
+  if (Array.isArray(sheet)) {
+    sheet.forEach((row, r) => row?.forEach((cell, c) => include(cell, r, c)));
+  } else {
+    for (const address of Object.keys(sheet)) {
+      if (address.startsWith("!")) continue;
+      const { r, c } = XLSX.utils.decode_cell(address);
+      include(sheet[address], r, c);
+    }
+  }
+  // Formatting can extend !ref to XFD. Keep meaningful cells, internal blanks,
+  // original coordinates and any merged area anchored by a meaningful cell.
+  for (const merge of sheet["!merges"] || []) {
+    if (cellText(sheet, merge.s.r, merge.s.c) !== "") {
+      lastRow = Math.max(lastRow, merge.e.r);
+      lastColumn = Math.max(lastColumn, merge.e.c);
+    }
+  }
+  return { sheet, totalRows: lastRow + 1, totalColumns: lastColumn + 1 };
+}
 
-  const range = XLSX.utils.decode_range(sheet["!ref"]);
-  const totalRows = range.e.r - range.s.r + 1;
-  const totalColumns = range.e.c - range.s.c + 1;
-  const rowPages = Math.max(1, Math.ceil(totalRows / PREVIEW_ROWS));
-  const columnPages = Math.max(1, Math.ceil(totalColumns / PREVIEW_COLUMNS));
-  const safeRowPage = Math.min(Math.max(0, rowPage), rowPages - 1);
-  const safeColumnPage = Math.min(Math.max(0, columnPage), columnPages - 1);
-  const firstRow = range.s.r + safeRowPage * PREVIEW_ROWS;
-  const firstColumn = range.s.c + safeColumnPage * PREVIEW_COLUMNS;
-  const columns = Array.from({ length: Math.min(PREVIEW_COLUMNS, range.e.c - firstColumn + 1) }, (_, i) => XLSX.utils.encode_col(firstColumn + i));
-  const rows = Array.from({ length: Math.min(PREVIEW_ROWS, range.e.r - firstRow + 1) }, (_, i) => {
-    const number = firstRow + i + 1;
-    const values = columns.map((_, j) => {
-      const row = firstRow + i;
-      const column = firstColumn + j;
-      const cell = Array.isArray(sheet) ? sheet[row]?.[column] : sheet[XLSX.utils.encode_cell({ r: row, c: column })];
-      return cell?.w ?? (cell?.v == null ? "" : String(cell.v));
-    });
-    return { number, values };
-  });
-  return { rows, columns, rowPages, columnPages, totalRows, totalColumns, rowPage: safeRowPage, columnPage: safeColumnPage };
+export function cellText(sheet, row, column) {
+  const cell = Array.isArray(sheet) ? sheet[row]?.[column] : sheet[XLSX.utils.encode_cell({ r: row, c: column })];
+  return String(cell?.w ?? (cell?.v == null ? "" : cell.v));
+}
+
+export function visibleSheetWindow(details, viewport, geometry) {
+  const { rowHeight, columnWidth, headerHeight, rowNumberWidth, overscan = 3 } = geometry;
+  const firstRow = Math.max(0, Math.floor(Math.max(0, viewport.top - headerHeight) / rowHeight) - overscan);
+  const firstColumn = Math.max(0, Math.floor(Math.max(0, viewport.left - rowNumberWidth) / columnWidth) - overscan);
+  const endRow = Math.min(details.totalRows, Math.ceil((viewport.top + viewport.height) / rowHeight) + overscan);
+  const endColumn = Math.min(details.totalColumns, Math.ceil((viewport.left + viewport.width) / columnWidth) + overscan);
+  return {
+    columns: Array.from({ length: Math.max(0, endColumn - firstColumn) }, (_, i) => ({ index: firstColumn + i, label: XLSX.utils.encode_col(firstColumn + i) })),
+    rows: Array.from({ length: Math.max(0, endRow - firstRow) }, (_, i) => ({ index: firstRow + i })),
+  };
 }

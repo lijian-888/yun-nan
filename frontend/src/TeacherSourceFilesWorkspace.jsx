@@ -1,7 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ArrowLeft, Download, FileText, Folder, LoaderCircle, Search, X } from "lucide-react";
 import { authorizedFetch, request } from "./api";
-import { readWorkbook, sheetPage } from "./teacherWorkbookPreview";
+import { readWorkbook } from "./teacherWorkbookPreview";
+import TeacherWorkbookGrid from "./TeacherWorkbookGrid";
 import "./TeacherSourceFilesWorkspace.css";
 
 const apiBase = "/api/research/teacher-source-files";
@@ -31,8 +32,6 @@ export default function TeacherSourceFilesWorkspace() {
   const [downloadError, setDownloadError] = useState("");
   const [preview, setPreview] = useState(null);
   const [sheetIndex, setSheetIndex] = useState(0);
-  const [rowPage, setRowPage] = useState(0);
-  const [columnPage, setColumnPage] = useState(0);
   const previewDialog = useRef(null);
   const previewController = useRef(null);
   const previewUrl = useRef("");
@@ -66,7 +65,7 @@ export default function TeacherSourceFilesWorkspace() {
     if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
     previewUrl.current = "";
     setPreview(null); setOpening(""); setDownloadError("");
-    setSheetIndex(0); setRowPage(0); setColumnPage(0);
+    setSheetIndex(0);
   }
 
   async function openPreview(item) {
@@ -74,7 +73,7 @@ export default function TeacherSourceFilesWorkspace() {
     previewController.current?.abort();
     const controller = new AbortController();
     previewController.current = controller;
-    setOpening(item.path); setError(""); setDownloadError(""); setSheetIndex(0); setRowPage(0); setColumnPage(0);
+    setOpening(item.path); setError(""); setDownloadError(""); setSheetIndex(0);
     setPreview({ item, kind: "loading" });
     try {
       if (!item.can_preview || item.size_bytes > previewLimit) {
@@ -124,7 +123,6 @@ export default function TeacherSourceFilesWorkspace() {
 
   const ancestors = path ? path.split("/") : [];
   const visible = (listing?.entries || []).filter(item => item.name.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()));
-  const workbookPage = useMemo(() => preview?.kind === "workbook" ? sheetPage(preview.workbook, preview.workbook.SheetNames[sheetIndex], rowPage, columnPage) : null, [preview, sheetIndex, rowPage, columnPage]);
 
   return <section className="teacher-files">
     <div className="teacher-files-intro"><h3>院内原始文件</h3><p>按老师文件夹浏览原始资料。点击文件名可在站内预览；原文件保持只读。</p></div>
@@ -143,9 +141,8 @@ export default function TeacherSourceFilesWorkspace() {
           {preview.kind === "image" && <img className="teacher-file-preview-image" src={preview.url} alt={preview.item.name} />}
           {preview.kind === "pdf" && <iframe className="teacher-file-preview-frame" src={preview.url} title={preview.item.name} />}
           {preview.kind === "text" && <pre className="teacher-file-preview-text">{preview.content}</pre>}
-          {preview.kind === "workbook" && <><nav className="teacher-file-sheet-tabs" aria-label="工作表">{preview.workbook.SheetNames.map((name, index) => <button type="button" key={`${name}-${index}`} aria-pressed={index === sheetIndex} onClick={() => { setSheetIndex(index); setRowPage(0); setColumnPage(0); }}>{name}</button>)}</nav>
-            <div className="teacher-file-preview-pagebar"><span>{preview.workbook.SheetNames[sheetIndex]} · {workbookPage.totalRows.toLocaleString()} 行 × {workbookPage.totalColumns.toLocaleString()} 列</span><div><button type="button" disabled={rowPage <= 0} onClick={() => setRowPage(value => value - 1)}>上一批行</button><span>{workbookPage.rowPage + 1}/{workbookPage.rowPages}</span><button type="button" disabled={rowPage >= workbookPage.rowPages - 1} onClick={() => setRowPage(value => value + 1)}>下一批行</button><button type="button" disabled={columnPage <= 0} onClick={() => setColumnPage(value => value - 1)}>左侧列</button><span>{workbookPage.columnPage + 1}/{workbookPage.columnPages}</span><button type="button" disabled={columnPage >= workbookPage.columnPages - 1} onClick={() => setColumnPage(value => value + 1)}>右侧列</button></div></div>
-            <div className="teacher-file-grid-scroll"><table className="teacher-file-grid"><thead><tr><th aria-label="行号">#</th>{workbookPage.columns.map(column => <th key={column}>{column}</th>)}</tr></thead><tbody>{workbookPage.rows.map(row => <tr key={row.number}><th scope="row">{row.number}</th>{row.values.map((value, index) => <td key={`${row.number}-${index}`}>{value}</td>)}</tr>)}{!workbookPage.rows.length && <tr><td colSpan={workbookPage.columns.length + 1}>这个工作表没有可显示的单元格。</td></tr>}</tbody></table></div>
+          {preview.kind === "workbook" && <><nav className="teacher-file-sheet-tabs" aria-label="工作表">{preview.workbook.SheetNames.map((name, index) => <button type="button" key={`${name}-${index}`} aria-pressed={index === sheetIndex} onClick={() => setSheetIndex(index)}>{name}</button>)}</nav>
+            <TeacherWorkbookGrid key={sheetIndex} workbook={preview.workbook} sheetName={preview.workbook.SheetNames[sheetIndex]} />
           </>}
         </div>
       </>}
