@@ -30,8 +30,8 @@ services:
       DEMO_DATA_ENABLED: "false"
       YNAAS_TEACHER_FILES_DIR: /data/teacher-source-files
     volumes:
-      # Only the four approved teacher folders are copied here; the source is read-only.
-      - /home/lijian/apps/ynaas-trial-teacher-files:/data/teacher-source-files:ro
+      # Copy of the four teacher folders from 老师数据/云南农科院数据; read-only in the API.
+      - /home/lijian/apps/ynaas-trial-teacher-files-20261013:/data/teacher-source-files:ro
     mem_limit: 4g
     cpus: 3
 
