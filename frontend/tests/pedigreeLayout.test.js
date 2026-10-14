@@ -158,6 +158,13 @@ test('fan paths and dense labels stay finite; original full names are not change
   const layout=verifyFan(graph);const source=layout.nodes[0];source.name='祖先'.repeat(50);
   assert.ok(fanLabel(source,.08).lines.length===0);assert.equal(source.name.length,100);
 });
+test('long known name switches to radial text instead of a blank sector',()=>{
+  const node={name:'IR8/科情3号',depth:4,inner:370,outer:470,start:-2.2,end:-2.1};
+  const label=fanLabel(node,1);
+  assert.equal(label.radial,true);
+  assert.equal(label.lines.join(''),node.name);
+  assert.equal(label.truncated,false);
+});
 test('real public server snapshots: complete fans keep every saved source relation',{skip:!process.env.PEDIGREE_PREVIEW_FIXTURE},()=>{
   const fixture=JSON.parse(readFileSync(process.env.PEDIGREE_PREVIEW_FIXTURE,'utf8'));
   for(const snapshot of Object.values(fixture.graphs))verifyFan(snapshot);

@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Search, GitBranch, LoaderCircle, X, Plus, Minus, Maximize, Download, ArrowLeft } from "lucide-react";
 import { request } from "./api";
-import { visiblePedigree, layoutFanPedigree, catalogCircleLayout, expandLevels, fitView, zoomView } from "./pedigreeLayout";
+import { visiblePedigree, layoutFanPedigree, catalogCircleLayout, expandLevels, fitView, zoomView, fanLabel } from "./pedigreeLayout";
 import PedigreeFan from './PedigreeFan';
 import "./PedigreeWorkspace.css";
 
@@ -45,6 +45,10 @@ export default function PedigreeWorkspace() {
   const visible=useMemo(()=>visiblePedigree(graph,expanded,showAll),[graph,expanded,showAll]);
   const layout=useMemo(()=>graph?layoutFanPedigree(graph,visible):selectedVariety?emptyLayout:catalogCircleLayout(catalog,group,list?.records||[]),[graph,visible,catalog,group,list,selectedVariety]);
   const parentIds=useMemo(()=>new Set((graph?.edges||[]).map(e=>String(e.child_id))),[graph]);
+  const compactNames=useMemo(()=>graph?layout.nodes.flatMap((node,index)=>{
+    const label=fanLabel(node,view.scale);
+    return !label.lines.length||label.truncated?[{node,index:index+1,numbered:!label.lines.length}]:[];
+  }):[],[graph,layout,view.scale]);
 
   function controller(kind) { requests.current[kind]?.abort(); const next=new AbortController(); requests.current[kind]=next; return next; }
   async function browse(next={keyword,group,only:onlyPedigree,page:1}) {
@@ -174,6 +178,7 @@ export default function PedigreeWorkspace() {
           <div className="pg-help">{graph?"内圈：亲本；外圈：更早祖先 · 放大查看密集区 · 紫色 ↗ 定位共同祖先":"滚轮缩放 · 拖动平移 · 目录连线仅表示分类包含"}</div>
         </div>
         {graph&&<div className="pg-inspection">{inspection||'悬停或聚焦扇区查看完整名称与关系；点击查看资料。'}</div>}
+        {compactNames.length>0&&<div className="pg-compact-names"><strong>窄扇区完整名称</strong><p>图中数字对应下列名称；放大可直接查看扇区文字。</p><div>{compactNames.map(({node,index,numbered})=><button key={node.id} onClick={()=>nodeAction(node,true)}>{numbered?`${index}. `:''}{node.name||'名称未记载'}{node.referenceTo?' ↗':''}</button>)}</div></div>}
         <div className="pg-legend">{graph?<><span>浅绿：母本分支</span><span>浅黄：父本分支</span><span>灰蓝：关系未注明，不推断父母本</span><span>灰色：来源文字</span><span>紫色：共同祖先引用，不是新材料</span><span>扇区位置表示来源层级，面积不表示遗传贡献</span><span>祖先层级不是 F1 / F2 世代</span>{graph.snapshot?.crawled_at&&<span>系谱采集：{new Date(graph.snapshot.crawled_at).toLocaleDateString("zh-CN")}</span>}</>:<span>四大类环绕浏览；每页最多12个品种。分类目录不表示遗传关系，点击中心返回全部类别。</span>}</div>
       </div>
     </div>

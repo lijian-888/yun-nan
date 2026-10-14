@@ -190,14 +190,20 @@ export function fanLabel(node, scale) {
   // overlays names; the full name remains available in title and node details.
   const font=Math.max(12,13/scale);
   const screenFont=font*scale;
-  const capacity=node.depth?Math.floor((node.inner+(node.outer-node.inner)*.35)*(node.end-node.start)*scale/screenFont)-1:Math.floor(node.outer*2*scale/screenFont);
+  let capacity=node.depth?Math.floor((node.inner+(node.outer-node.inner)*.35)*(node.end-node.start)*scale/screenFont)-1:Math.floor(node.outer*2*scale/screenFont);
   const value=Array.from(node.name||'');
   const glyphWidth=character=>/[\u0000-\u007f]/.test(character)?.6:1;
   const textWidth=value.reduce((sum,character)=>sum+glyphWidth(character),0);
-  const rows=Math.min(2,Math.floor((node.depth?node.outer-node.inner:node.outer*2)*scale/(screenFont*1.3)));
-  // Two or three visible glyphs plus an ellipsis look like corrupted labels in
-  // the complete overview. Keep narrow sectors quiet until the user zooms in.
-  if(capacity<2||rows<1||(node.depth&&capacity<5&&textWidth>capacity))return {lines:[],font};
+  let rows=Math.min(2,Math.floor((node.depth?node.outer-node.inner:node.outer*2)*scale/(screenFont*1.3)));
+  let radial=false;
+  // A long label can fit along the ring thickness even if it cannot fit across
+  // the arc. Reserve the outer area for the expansion control.
+  if(node.depth&&(capacity<2||rows<1||(capacity<5&&textWidth>capacity))){
+    radial=true;
+    capacity=Math.floor((node.outer-node.inner-30)*scale/screenFont);
+    rows=Math.min(2,Math.floor(((node.inner+node.outer)/2)*(node.end-node.start)*scale/(screenFont*1.3)));
+  }
+  if(capacity<2||rows<1)return {lines:[],font,radial};
   const limit=Math.min(18,capacity);
   const lines=[];let offset=0;
   for(let row=0;row<rows&&offset<value.length;row++){
@@ -208,7 +214,7 @@ export function fanLabel(node, scale) {
     if(line)lines.push(line);
   }
   if(offset<value.length&&lines.length)lines[lines.length-1]=lines[lines.length-1].slice(0,-1)+'…';
-  return {lines,font};
+  return {lines,font,radial,truncated:offset<value.length};
 }
 
 export function fitView(layout, viewport) {
