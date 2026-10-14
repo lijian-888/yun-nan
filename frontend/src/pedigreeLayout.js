@@ -151,7 +151,10 @@ export function layoutFanPedigree(graph, visible) {
       node.path=node.depth?fanSectorPath(cx,cy,node.inner,node.outer,node.start,node.end):null;
       let cursor=node.start;
       node.children.forEach(child=>{
-        child.start=cursor;child.end=cursor+(node.end-node.start)*child.leaves/node.leaves;cursor=child.end;
+        // Each recorded parent gets an equal branch, even when its ancestors
+        // or linked variety dossier are missing. Leaf-count weighting made
+        // named terminal parents almost invisible beside a deep sibling.
+        child.start=cursor;child.end=cursor+(node.end-node.start)/node.children.length;cursor=child.end;
         child.lineage=node.depth===0?(child.relation||'unknown'):node.lineage;
       });
     });
@@ -189,13 +192,22 @@ export function fanLabel(node, scale) {
   const screenFont=font*scale;
   const capacity=node.depth?Math.floor((node.inner+(node.outer-node.inner)*.35)*(node.end-node.start)*scale/screenFont)-1:Math.floor(node.outer*2*scale/screenFont);
   const value=Array.from(node.name||'');
+  const glyphWidth=character=>/[\u0000-\u007f]/.test(character)?.6:1;
+  const textWidth=value.reduce((sum,character)=>sum+glyphWidth(character),0);
   const rows=Math.min(2,Math.floor((node.depth?node.outer-node.inner:node.outer*2)*scale/(screenFont*1.3)));
   // Two or three visible glyphs plus an ellipsis look like corrupted labels in
   // the complete overview. Keep narrow sectors quiet until the user zooms in.
-  if(capacity<(node.depth?5:2)||rows<1)return {lines:[],font};
+  if(capacity<2||rows<1||(node.depth&&capacity<5&&textWidth>capacity))return {lines:[],font};
   const limit=Math.min(18,capacity);
-  const lines=[value.slice(0,limit).join(''),rows>1?value.slice(limit,limit*2).join(''):''].filter(Boolean);
-  if(value.length>limit*rows)lines[lines.length-1]=lines[lines.length-1].slice(0,-1)+'…';
+  const lines=[];let offset=0;
+  for(let row=0;row<rows&&offset<value.length;row++){
+    let line='',width=0;
+    while(offset<value.length&&width+glyphWidth(value[offset])<=limit){
+      const character=value[offset++];line+=character;width+=glyphWidth(character);
+    }
+    if(line)lines.push(line);
+  }
+  if(offset<value.length&&lines.length)lines[lines.length-1]=lines[lines.length-1].slice(0,-1)+'…';
   return {lines,font};
 }
 

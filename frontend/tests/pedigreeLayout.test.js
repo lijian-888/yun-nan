@@ -144,6 +144,15 @@ test('circle catalogue has exactly four categories and only current page records
   assert.equal(page.nodes.length,3);assert.deepEqual(page.nodes.slice(1).map(n=>n.variety_id),[41,42]);
   assert.ok(page.nodes.every(n=>n.circle));
 });
+test('named terminal parent keeps equal branch space beside a deep ancestry',()=>{
+  const source={root_ids:[1],nodes:[1,2,3,4,5,6].map(id=>({id,name:id===3?'98P95':String(id)})),
+    edges:[{id:1,child_id:1,parent_id:2},{id:2,child_id:1,parent_id:3},
+      {id:3,child_id:2,parent_id:4},{id:4,child_id:2,parent_id:5},{id:5,child_id:4,parent_id:6}]};
+  const layout=verifyFan(source),terminal=layout.nodes.find(n=>n.sourceId==='3');
+  assert.ok(Math.abs(terminal.end-terminal.start-Math.PI/2)<1e-9);
+  assert.equal(fanLabel(terminal,1).lines.join(''),'98P95');
+  assert.equal(fanLabel({...terminal,name:'IR8'},1).lines.join(''),'IR8');
+});
 test('fan paths and dense labels stay finite; original full names are not changed',()=>{
   assert.ok(!fanSectorPath(200,200,50,100,-Math.PI,0).includes('NaN'));
   const layout=verifyFan(graph);const source=layout.nodes[0];source.name='祖先'.repeat(50);
