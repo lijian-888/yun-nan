@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { visiblePedigree, layoutPedigree, expandLevels, fitView, zoomView, NODE_WIDTH, NODE_HEIGHT, nodeNameLines } from "../src/pedigreeLayout.js";
+import { visiblePedigree, layoutPedigree, layoutFanPedigree, catalogCircleLayout, fanLabel, fanSectorPath, expandLevels, fitView, zoomView, NODE_WIDTH, NODE_HEIGHT, nodeNameLines } from "../src/pedigreeLayout.js";
 
 const graph = { root_ids:[1], nodes:[1,2,3,4,5].map(id=>({id,name:id===2||id===3?"同名亲本":String(id)})),
   edges:[{id:1,child_id:1,parent_id:2},{id:2,child_id:1,parent_id:3},{id:3,child_id:2,parent_id:4},{id:4,child_id:3,parent_id:4}] };
@@ -104,4 +104,52 @@ test("long names wrap; full source name stays untouched",()=>{
 test("real public server snapshots: all relations retained without crossings",{skip:!process.env.PEDIGREE_PREVIEW_FIXTURE},()=>{
   const fixture=JSON.parse(readFileSync(process.env.PEDIGREE_PREVIEW_FIXTURE,'utf8'));
   for(const snapshot of Object.values(fixture.graphs))verifyTree(snapshot);
+});
+
+function verifyFan(source){
+  const layout=layoutFanPedigree(source,visiblePedigree(source,new Set(),true));
+  assert.equal(layout.nodes.filter(n=>!n.referenceTo).length,source.nodes.length);
+  assert.deepEqual(layout.edges.map(e=>e.id).sort(),source.edges.map(e=>e.id).sort());
+  assert.ok(layout.nodes.length<=source.nodes.length+source.edges.length);
+  for(const edge of layout.edges){
+    const child=edge.to,parent=edge.from;
+    assert.equal(child.edgeId,edge.id);assert.equal(child.depth,parent.depth+1);
+    assert.ok(child.start>=parent.start-1e-9&&child.end<=parent.end+1e-9,'child sector stays in its source branch');
+  }
+  for(const node of layout.nodes){
+    assert.ok(Number.isFinite(node.x)&&Number.isFinite(node.y));
+    assert.ok(node.end>node.start);assert.ok(node.inner<node.outer);
+    assert.ok(node.x>=0&&node.x<=layout.width&&node.y>=0&&node.y<=layout.height);
+    assert.ok(!node.path||!node.path.includes('NaN'));
+    for(let i=1;i<node.children.length;i++)assert.ok(node.children[i-1].end<=node.children[i].start+1e-9,'siblings do not overlap');
+    if(node.referenceTo){assert.equal(node.children.length,0);assert.equal(layout.nodes.find(n=>n.id===node.referenceTo).sourceId,node.sourceId);}
+    for(const scale of [.08,.25,1,3])assert.ok(fanLabel(node,scale).lines.length<=2);
+  }
+  return layout;
+}
+test('fan preserves source DAG, cycles and disconnected components without crossing links',()=>{
+  const layout=verifyFan({...graph,edges:[...graph.edges,{id:8,child_id:4,parent_id:1},{id:9,child_id:5,parent_id:4}]});
+  assert.equal(layout.nodes.filter(n=>n.cycle).length,1);
+  assert.equal(layout.nodes.find(n=>n.sourceId==='5').disconnected,true);
+});
+test('fan supports more than two sources without assigning invented parental roles',()=>{
+  const source={root_ids:[1],nodes:[1,2,3,4].map(id=>({id,name:String(id)})),edges:[2,3,4].map(id=>({id,child_id:1,parent_id:id,role:'unknown'}))};
+  const layout=verifyFan(source);assert.equal(layout.nodes[0].children.length,3);
+  assert.ok(layout.nodes.slice(1).every(n=>n.lineage==='unknown'));
+});
+test('circle catalogue has exactly four categories and only current page records',()=>{
+  const catalog={total:20,groups:['indica','japonica','mixed','other'].map((code,i)=>({code,name:code,count:i+1}))};
+  const overview=catalogCircleLayout(catalog,'',[]);assert.equal(overview.nodes.length,5);assert.equal(overview.edges.length,4);
+  const page=catalogCircleLayout(catalog,'indica',[{id:41,name:'A'},{id:42,name:'B'}]);
+  assert.equal(page.nodes.length,3);assert.deepEqual(page.nodes.slice(1).map(n=>n.variety_id),[41,42]);
+  assert.ok(page.nodes.every(n=>n.circle));
+});
+test('fan paths and dense labels stay finite; original full names are not changed',()=>{
+  assert.ok(!fanSectorPath(200,200,50,100,-Math.PI,0).includes('NaN'));
+  const layout=verifyFan(graph);const source=layout.nodes[0];source.name='祖先'.repeat(50);
+  assert.ok(fanLabel(source,.08).lines.length===0);assert.equal(source.name.length,100);
+});
+test('real public server snapshots: complete fans keep every saved source relation',{skip:!process.env.PEDIGREE_PREVIEW_FIXTURE},()=>{
+  const fixture=JSON.parse(readFileSync(process.env.PEDIGREE_PREVIEW_FIXTURE,'utf8'));
+  for(const snapshot of Object.values(fixture.graphs))verifyFan(snapshot);
 });

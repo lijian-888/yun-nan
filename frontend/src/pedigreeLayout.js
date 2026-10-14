@@ -121,6 +121,84 @@ export function nodeNameLines(value) {
   return lines;
 }
 
+export function fanSectorPath(cx, cy, inner, outer, start, end) {
+  const polar=(radius,angle)=>({x:cx+radius*Math.cos(angle),y:cy+radius*Math.sin(angle)});
+  const a=polar(outer,start),b=polar(outer,end),c=polar(inner,end),d=polar(inner,start);
+  return `M${a.x},${a.y} A${outer},${outer} 0 ${end-start>Math.PI?1:0} 1 ${b.x},${b.y} L${c.x},${c.y} A${inner},${inner} 0 ${end-start>Math.PI?1:0} 0 ${d.x},${d.y} Z`;
+}
+
+export function layoutFanPedigree(graph, visible) {
+  // Reuse source-ID based bounded unfolding: references end locally, never
+  // connect across sectors. Unknown roles and source text are retained as-is.
+  const forest=layoutPedigree(graph,visible);
+  const roots=forest.nodes.filter(n=>n.depth===0);
+  for(let i=forest.nodes.length-1;i>=0;i--){
+    const node=forest.nodes[i];node.leaves=node.children.length?node.children.reduce((sum,child)=>sum+child.leaves,0):1;
+  }
+  let top=46,width=420;const labels=[];
+  roots.forEach(root=>{
+    const members=[];const pending=[root];
+    while(pending.length){const node=pending.pop();members.push(node);pending.push(...node.children);}
+    const depth=Math.max(...members.map(n=>n.depth)),radius=58+depth*104;
+    const cx=radius+36,cy=top+radius;
+    width=Math.max(width,cx+radius+36);
+    root.start=-Math.PI;root.end=0;root.lineage='root';
+    members.forEach(node=>{
+      node.cx=cx;node.cy=cy;node.inner=node.depth?58+(node.depth-1)*104:0;
+      node.outer=node.depth?58+node.depth*104-4:50;
+      const angle=(node.start+node.end)/2,r=(node.inner+node.outer)/2;
+      node.angle=angle;node.x=node.depth?cx+r*Math.cos(angle):cx;node.y=node.depth?cy+r*Math.sin(angle):cy;
+      node.path=node.depth?fanSectorPath(cx,cy,node.inner,node.outer,node.start,node.end):null;
+      let cursor=node.start;
+      node.children.forEach(child=>{
+        child.start=cursor;child.end=cursor+(node.end-node.start)*child.leaves/node.leaves;cursor=child.end;
+        child.lineage=node.depth===0?(child.relation||'unknown'):node.lineage;
+      });
+    });
+    labels.push({x:36,y:top-18,label:root.disconnected?'未连接来源节点 · 不认定为当前品种祖先':'扇形祖先谱 · 从内向外追溯亲本来源'});
+    top=cy+104;
+  });
+  // Rectangular-tree routes are deliberately NOT rendered in a fan. Each
+  // original edge is represented by its nested child sector and original ID.
+  forest.edges.forEach(edge=>{edge.to.edgeId=edge.id;delete edge.points;});
+  return {...forest,labels,width,height:Math.max(270,top+24),fan:true};
+}
+
+export function catalogCircleLayout(catalog, group, records) {
+  const category=(catalog?.groups||[]).find(g=>g.code===group);
+  const items=category?records:(catalog?.groups||[]);
+  const radius=category?Math.max(205,items.length*110/(2*Math.PI)):180;
+  const cx=radius+110,cy=radius+110;
+  const center={id:'catalog',name:category?.name||'国家水稻品种库',subtitle:`${Number(category?.count??catalog?.total??0).toLocaleString()} 个品种`,x:cx,y:cy,radius:56,circle:true,kind:'catalog',is_root:true};
+  const nodes=[center],edges=[];
+  items.forEach((item,index)=>{
+    const angle=-Math.PI/2+index*2*Math.PI/items.length;
+    const node={...item,id:category?`variety-${item.id}`:`group-${item.code}`,name:item.name,
+      variety_id:category?item.id:undefined,group:category?undefined:item.code,kind:category?'catalog-variety':'catalog',circle:true,
+      subtitle:category?(item.edge_count?'已有系谱':'未收录亲本关系'):`${Number(item.count).toLocaleString()} 个品种`,
+      x:cx+radius*Math.cos(angle),y:cy+radius*Math.sin(angle),radius:category?28:42};
+    nodes.push(node);edges.push({id:`contains-${node.id}`,from:center,to:node,catalog:true});
+  });
+  return {nodes,edges,width:2*cx,height:2*cy+30,labels:[],fan:false};
+}
+
+export function fanLabel(node, scale) {
+  // Fit names to actual on-screen sector space. Dense all-tree overview never
+  // overlays names; the full name remains available in title and node details.
+  const font=Math.max(12,13/scale);
+  const screenFont=font*scale;
+  const capacity=node.depth?Math.floor((node.inner+(node.outer-node.inner)*.35)*(node.end-node.start)*scale/screenFont)-1:Math.floor(node.outer*2*scale/screenFont);
+  const value=Array.from(node.name||'');
+  const rows=Math.min(2,Math.floor((node.depth?node.outer-node.inner:node.outer*2)*scale/(screenFont*1.3)));
+  // Two or three visible glyphs plus an ellipsis look like corrupted labels in
+  // the complete overview. Keep narrow sectors quiet until the user zooms in.
+  if(capacity<(node.depth?5:2)||rows<1)return {lines:[],font};
+  const limit=Math.min(18,capacity);
+  const lines=[value.slice(0,limit).join(''),rows>1?value.slice(limit,limit*2).join(''):''].filter(Boolean);
+  if(value.length>limit*rows)lines[lines.length-1]=lines[lines.length-1].slice(0,-1)+'…';
+  return {lines,font};
+}
+
 export function fitView(layout, viewport) {
   const scale = Math.min(1.15, Math.max(.08, Math.min((viewport.width-48)/layout.width,(viewport.height-48)/layout.height)));
   return {scale,x:(viewport.width-layout.width*scale)/2,y:(viewport.height-layout.height*scale)/2};
