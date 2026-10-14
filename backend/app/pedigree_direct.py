@@ -61,7 +61,7 @@ def assemble(root,facts,limit=5000):
             node.update(id=node['key'],kind='variety' if node['source_id'] else 'cross' if '/' in node['name'] else 'text',
                         variety_id=None,is_root=node['key']==root,was_expandable=bool(node['source_id']),expansion_succeeded=True,recorded_depth=0)
             if not node['name'].strip() or node['name'].strip() in ('0','?','？'):
-                node['name']='亲本名称待核实';node['kind']='unknown';conflicts.add(node['key'])
+                node['raw_name']=node['name'];node['name']='亲本名称待核实';node['kind']='unknown';conflicts.add(node['key'])
             nodes.setdefault(node['key'],node)
         if len(nodes)>limit:raise ValueError('Direct graph exceeds safe display bound; not silently truncated')
         for edge in value['edges']:

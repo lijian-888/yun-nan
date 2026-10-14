@@ -27,7 +27,7 @@ def main():
         if len(values)>1:facts[key]['status']='conflict'
     results=[]
     for vid,records in complete:
-        root=fragment(records)['root'];graph=assemble(root,facts);adj=defaultdict(list);names={n['id']:n['name'] for n in graph['nodes']};actual=Counter()
+        root=fragment(records)['root'];graph=assemble(root,facts);adj=defaultdict(list);names={n['id']:n.get('raw_name',n['name']) for n in graph['nodes']};actual=Counter()
         for e in graph['edges']:adj[e['child_id']].append(e['parent_id'])
         stack=[(root,(),frozenset())]
         while stack:
@@ -35,10 +35,12 @@ def main():
             if key in seen or sum(actual.values())>len(records):break
             path=path+(names[key],);actual[path]+=1
             stack.extend((p,path,seen|{key}) for p in adj[key])
-        matched=graph['fully_expanded'] and dict(actual)==occurrence_paths(records)
-        results.append(dict(variety_id=vid,name=records[0]['name'],source_occurrences=len(records),reconstructed_occurrences=sum(actual.values()),status='matched' if matched else 'mismatch',warnings=graph['warnings']))
+        gaps=sum(n['kind']=='unknown' for n in graph['nodes'])
+        matched=dict(actual)==occurrence_paths(records) and not graph['missing_count'] and not graph['blocked_relation_count'] and graph['conflict_count']==gaps
+        status=('matched_with_source_name_gap' if gaps else 'matched') if matched else 'mismatch'
+        results.append(dict(variety_id=vid,name=records[0]['name'],source_occurrences=len(records),reconstructed_occurrences=sum(actual.values()),status=status,fully_expanded=graph['fully_expanded'],warnings=graph['warnings']))
     report=dict(created_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),observations=observations,unique_materials=len(facts),
-                conflicting_materials=sum(len(v)>1 for v in variants.values()),complete_trees=len(results),failures=sum(r['status']!='matched' for r in results),results=results)
+                conflicting_materials=sum(len(v)>1 for v in variants.values()),complete_trees=len(results),source_name_gaps=sum(r['status']=='matched_with_source_name_gap' for r in results),failures=sum(r['status']=='mismatch' for r in results),results=results)
     args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(json.dumps(report,ensure_ascii=False,indent=2))
     print(json.dumps({k:v for k,v in report.items() if k!='results'},ensure_ascii=False))
     for result in results:
