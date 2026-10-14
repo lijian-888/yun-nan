@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("refresh",Path(__file__).parents[1]/"scripts"/"refresh_ricedata_pedigree.py")
 refresh = importlib.util.module_from_spec(spec)
@@ -8,6 +9,24 @@ spec.loader.exec_module(refresh)
 
 
 class RefreshTests(unittest.TestCase):
+    def test_network_failure_is_retried_and_never_returns_complete(self):
+        with patch.object(refresh.requests,"Session") as factory,patch.object(refresh.time,"sleep"):
+            client=factory.return_value.__enter__.return_value
+            client.get.side_effect=refresh.requests.Timeout("test")
+            with self.assertRaises(refresh.requests.Timeout):
+                refresh.collect(1)
+            self.assertEqual(client.get.call_count,3)
+
+    def test_expansion_that_loses_a_branch_is_rejected(self):
+        before="""<div id="pedigree"><table><tr><td><a href="javascript:__doPostBack('pedigree','t1')"><img alt="展开 根"/></a></td><td><a id="pedigreet0" href="varis/1.htm">根</a></td></tr></table><table><tr><td></td><td></td><td><a id="pedigreet1">已有亲本</a></td></tr></table></div>"""
+        after="""<div id="pedigree"><table><tr><td><a href="javascript:__doPostBack('pedigree','t1')"><img alt="折叠 根"/></a></td><td><a id="pedigreet0" href="varis/1.htm">根</a></td></tr></table></div>"""
+        with patch.object(refresh.requests,"Session") as factory,patch.object(refresh.time,"sleep"):
+            client=factory.return_value.__enter__.return_value
+            client.get.return_value.content=before.encode()
+            client.post.return_value.content=after.encode()
+            with self.assertRaisesRegex(ValueError,"lost an existing branch"):
+                refresh.collect(1)
+
     def test_pending_source_cannot_be_published(self):
         for records in [[dict(name="x",pending_expansion=True)],[dict(name="x")],[]]:
             with self.assertRaises(ValueError):
