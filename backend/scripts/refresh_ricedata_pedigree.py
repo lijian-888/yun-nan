@@ -17,6 +17,11 @@ import requests
 from bs4 import BeautifulSoup
 from sqlalchemy import create_engine, text
 
+try:
+    from lxml import etree
+except ImportError:
+    etree=None
+
 
 HTML_PARSER="lxml" if importlib.util.find_spec("lxml") else "html.parser"
 
@@ -67,6 +72,77 @@ def parse_tree(html, source_url, document=None):
     if not records or sum(n["depth"] == 0 for n in records) != 1:
         raise ValueError("Source root ambiguous")
     return records, pending
+
+
+def parse_source(html,source_url,mode='auto'):
+    """Return one document's tree and POST state; keep the reference for differential verification."""
+    if mode not in ('auto','direct','reference'):
+        raise ValueError('Unknown parser mode')
+    if mode=='reference' or (mode=='auto' and etree is None):
+        document=source_document(html)
+        records,pending=parse_tree(html,source_url,document)
+        return records,pending,{n['name']:n.get('value','') for n in document.select('input[name]')}
+    if etree is None:
+        raise RuntimeError('Direct parser requires lxml')
+    document=etree.HTML(html,parser=etree.HTMLParser(no_network=True,huge_tree=True))
+    trees=document.xpath('//*[@id="pedigree"]') if document is not None else []
+    if not trees:
+        raise ValueError('Source tree missing')
+    records,stack,pending=[],{},[]
+
+    def label_text(element):
+        # Match BeautifulSoup get_text(' ',strip=True), excluding comments/scripts/styles.
+        parts=[]
+        def visit(node):
+            if node.text and node.text.strip():
+                parts.append(node.text.strip())
+            for child in node:
+                if isinstance(child.tag,str) and child.tag not in ('script','style'):
+                    visit(child)
+                if child.tail and child.tail.strip():
+                    parts.append(child.tail.strip())
+        visit(element)
+        return ' '.join(parts)
+
+    for table in trees[0].findall('table'):
+        row=table.find('.//tr')
+        cells=row.findall('td') if row is not None else []
+        if len(cells)<2:
+            raise ValueError('Unrecognized source tree row')
+        anchor=next((a for a in cells[-1].iter('a') if re.fullmatch(r'pedigreet\d+',a.get('id',''))),None)
+        if anchor is None:
+            raise ValueError('Unrecognized source tree row')
+        name=label_text(anchor)
+        if not name:
+            raise ValueError('Empty source label')
+        depth=len(cells)-2
+        if depth and depth-1 not in stack:
+            raise ValueError('Source hierarchy incomplete')
+        parent=stack.get(depth-1) if depth else None
+        toggle=next(cells[-2].iter('a'),None)
+        image=next(toggle.iter('img'),None) if toggle is not None else None
+        expandable=image is not None
+        alt=image.get('alt','') if image is not None else ''
+        if expandable and not alt.startswith(('展开','折叠')):
+            raise ValueError('Unknown source expansion state')
+        is_pending=expandable and alt.startswith('展开')
+        if is_pending:
+            match=re.search(r"__doPostBack\('pedigree','([^']+)'\)",toggle.get('href',''))
+            if not match:
+                raise ValueError('Expansion argument missing')
+            if not match[1].startswith('t'):
+                raise ValueError('Unexpected source expansion action')
+            pending.append(match[1].replace('\\\\','\\'))
+        linked=re.search(r'^varis/([1-9]\d*)\.htm',anchor.get('href',''))
+        records.append(dict(name=name,depth=depth,parent=parent,source_id=linked.group(1) if linked else None,
+                            url=urljoin(source_url,anchor.get('href','')) if linked else source_url,
+                            expandable=expandable,pending_expansion=is_pending))
+        stack[depth]=len(records)-1
+        stack={d:i for d,i in stack.items() if d<=depth}
+    if not records or sum(n['depth']==0 for n in records)!=1:
+        raise ValueError('Source root ambiguous')
+    fields={n.get('name'):n.get('value','') for n in document.iter('input') if 'name' in n.attrib}
+    return records,pending,fields
 
 
 def decode_response(response):
@@ -130,12 +206,10 @@ def collect(source_id, limit=10000, delay=.5, *, resume=None, on_progress=None,
             html=request('get')
         while True:
             clock=time.monotonic()
-            document=source_document(html)
-            records,pending=parse_tree(html,url,document)
+            records,pending,fields=parse_source(html,url)
             paths=occurrence_paths(records)
             if previous is not None and any(paths.get(path,0)<count for path,count in previous.items()):
                 raise ValueError('Expansion lost an existing branch; no import')
-            fields={n['name']:n.get('value','') for n in document.select('input[name]')}
             parse_seconds+=time.monotonic()-clock
             if len(records)>20000:
                 raise ValueError('Source exceeds occurrence bound; no import')

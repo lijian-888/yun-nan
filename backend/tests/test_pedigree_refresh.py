@@ -11,11 +11,11 @@ spec.loader.exec_module(refresh)
 class RefreshTests(unittest.TestCase):
     def test_one_document_parse_per_response(self):
         html='<div id="pedigree"><table><tr><td></td><td><a id="pedigreet0" href="varis/1.htm">根</a></td></tr></table></div>'
-        with patch.object(refresh.requests,'Session') as factory,patch.object(refresh.time,'sleep'),patch.object(refresh,'BeautifulSoup',wraps=refresh.BeautifulSoup) as soup:
+        with patch.object(refresh.requests,'Session') as factory,patch.object(refresh.time,'sleep'),patch.object(refresh,'parse_source',wraps=refresh.parse_source) as parse:
             factory.return_value.__enter__.return_value.get.return_value.content=html.encode()
             progress=[]
             refresh.collect(1,on_progress=lambda state,metric: progress.append(metric))
-            self.assertEqual(soup.call_count,1)
+            self.assertEqual(parse.call_count,1)
             self.assertEqual(progress[-1]['pending_branches'],0)
 
     def test_slice_resumes_exact_page_without_publishing_partial(self):
