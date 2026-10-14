@@ -81,7 +81,18 @@ def occurrence_paths(records):
 def collect(source_id, limit=10000, delay=.5):
     url = f"https://www.ricedata.cn/variety/pedigree.aspx?id={source_id}&fromid="
     with requests.Session() as client:
-        response = client.get(url, timeout=20)
+        for attempt in range(3):
+            time.sleep(delay+attempt)
+            response=None
+            try:
+                response=client.get(url,timeout=30)
+                response.raise_for_status()
+                break
+            except requests.RequestException:
+                if response is not None and response.status_code in (403,429):
+                    raise
+                if attempt==2:
+                    raise
         response.raise_for_status()
         html = decode_response(response)
         expanded = set()
@@ -98,11 +109,14 @@ def collect(source_id, limit=10000, delay=.5):
             fields.update(__EVENTTARGET="pedigree", __EVENTARGUMENT=argument)
             for attempt in range(3):
                 time.sleep(delay+attempt)
+                response=None
                 try:
                     response = client.post(url, data=fields, timeout=30)
                     html = decode_response(response)
                     break
                 except (requests.RequestException,UnicodeError):
+                    if response is not None and response.status_code in (403,429):
+                        raise
                     if attempt == 2:
                         raise
             next_records,_=parse_tree(html,url)

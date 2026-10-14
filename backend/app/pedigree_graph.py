@@ -35,14 +35,17 @@ def catalog(session):
     session.execute(text("SET LOCAL statement_timeout='8s'"))
     groups = rows(session, f"""WITH latest AS ({LATEST_SQL})
         SELECT {GROUP_SQL} AS code,count(*) AS count,
-          count(*) FILTER(WHERE s.edge_count>0) AS with_pedigree
+          count(*) FILTER(WHERE s.edge_count>0) AS with_pedigree,
+          count(*) FILTER(WHERE s.pedigree_snapshot_id IS NOT NULL) AS verified
         FROM agent_query.ricedata__rice_variety v LEFT JOIN latest s USING(variety_id)
         GROUP BY 1""")
     by_code = {row["code"]: row for row in groups}
     groups = [{"code": code, "name": name, "count": by_code.get(code, {}).get("count", 0),
-               "with_pedigree": by_code.get(code, {}).get("with_pedigree", 0)} for code, name in GROUP_NAMES.items()]
+               "with_pedigree": by_code.get(code, {}).get("with_pedigree", 0),
+               "verified": by_code.get(code, {}).get("verified",0)} for code, name in GROUP_NAMES.items()]
     return {"total": sum(g["count"] for g in groups), "with_pedigree": sum(g["with_pedigree"] for g in groups),
-            "groups": groups, "source": "国家水稻数据中心", "scope": "目录分组不是亲缘关系；系谱仅展示已保存的来源记录。"}
+            "verified_count":sum(g["verified"] for g in groups),
+            "groups": groups, "source": "国家水稻数据中心", "scope": "目录分组不是亲缘关系；系谱仅展示原站完整采集校验通过的来源记录。"}
 
 
 def list_varieties(session, keyword="", group="", only_pedigree=False, page=1, page_size=30):

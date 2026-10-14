@@ -60,6 +60,11 @@ def main():
             except Exception as exc:
                 failed[str(vid)]=dict(name=variety["variety_name"],attempt=attempt+1,error=type(exc).__name__+": "+str(exc))
                 print(json.dumps(dict(id=vid,status="failed",attempt=attempt+1,error=failed[str(vid)]["error"]),ensure_ascii=False),flush=True)
+                if getattr(getattr(exc,"response",None),"status_code",None) in (403,429):
+                    data=progress(variety)
+                    data["status"]="source_access_blocked"
+                    (args.state_dir/"progress.json").write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8")
+                    return
                 time.sleep(3)
             attempted+=1
             progress()
