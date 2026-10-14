@@ -1,4 +1,16 @@
 services:
+  pedigree-direct:
+    image: ynaas-trial-api:${PEDIGREE_RELEASE_TAG:-${RELEASE_TAG:?Set RELEASE_TAG}}
+    profiles: [pedigree-direct]
+    command: [python, /app/scripts/collect_ricedata_direct.py, --state-dir, /data/research/pedigree-direct, --original-state, /data/research/pedigree-rebuild]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://rice:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ynaas_rice_ai
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - research_data:/data/research
+    restart: on-failure:3
+    mem_limit: 1g
+    cpus: 0.5
   pedigree-rebuild:
     image: ynaas-trial-api:${PEDIGREE_RELEASE_TAG:-${RELEASE_TAG:?Set RELEASE_TAG}}
     profiles: [pedigree-rebuild]

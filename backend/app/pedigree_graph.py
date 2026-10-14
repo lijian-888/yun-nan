@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from .variety_search import VarietySearchRequest, compile_search
+from .pedigree_direct import load_graph
 
 logger = logging.getLogger(__name__)
 GROUP_NAMES = {"indica": "籼稻", "japonica": "粳稻", "mixed": "籼粳交", "other": "其他 / 类型未记载"}
@@ -35,17 +36,22 @@ def catalog(session):
     session.execute(text("SET LOCAL statement_timeout='8s'"))
     groups = rows(session, f"""WITH latest AS ({LATEST_SQL})
         SELECT {GROUP_SQL} AS code,count(*) AS count,
-          count(*) FILTER(WHERE s.edge_count>0) AS with_pedigree,
-          count(*) FILTER(WHERE s.pedigree_snapshot_id IS NOT NULL) AS verified
+          count(*) FILTER(WHERE COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges'),0)>0) AS with_pedigree,
+          count(*) FILTER(WHERE s.pedigree_snapshot_id IS NOT NULL) AS verified,
+          count(*) FILTER(WHERE f.fact_key IS NOT NULL) AS direct_collected
         FROM agent_query.ricedata__rice_variety v LEFT JOIN latest s USING(variety_id)
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_job j ON j.source_id=v.source_variety_id AND j.status='complete'
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_fact f ON f.fact_key=j.root_key AND f.status='verified_direct'
         GROUP BY 1""")
     by_code = {row["code"]: row for row in groups}
     groups = [{"code": code, "name": name, "count": by_code.get(code, {}).get("count", 0),
                "with_pedigree": by_code.get(code, {}).get("with_pedigree", 0),
-               "verified": by_code.get(code, {}).get("verified",0)} for code, name in GROUP_NAMES.items()]
+               "verified": by_code.get(code, {}).get("verified",0),
+               "direct_collected":by_code.get(code,{}).get("direct_collected",0)} for code, name in GROUP_NAMES.items()]
     return {"total": sum(g["count"] for g in groups), "with_pedigree": sum(g["with_pedigree"] for g in groups),
             "verified_count":sum(g["verified"] for g in groups),
-            "groups": groups, "source": "国家水稻数据中心", "scope": "目录分组不是亲缘关系；系谱仅展示原站完整采集校验通过的来源记录。"}
+            "direct_count":sum(g['direct_collected'] for g in groups),
+            "groups": groups, "source": "国家水稻数据中心", "scope": "目录分组不是亲缘关系；直接亲本已取证不等于全部祖先已完成。"}
 
 
 def list_varieties(session, keyword="", group="", only_pedigree=False, page=1, page_size=30):
@@ -55,14 +61,17 @@ def list_varieties(session, keyword="", group="", only_pedigree=False, page=1, p
         where += f" AND ({GROUP_SQL})=:group"
         params["group"] = group
     if only_pedigree:
-        where += " AND s.edge_count>0"
+        where += " AND COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges'),0)>0"
     relation = f"WITH latest AS ({LATEST_SQL})"
-    join = "FROM agent_query.ricedata__rice_variety v LEFT JOIN latest s USING(variety_id)"
+    join = """FROM agent_query.ricedata__rice_variety v LEFT JOIN latest s USING(variety_id)
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_job j ON j.source_id=v.source_variety_id AND j.status='complete'
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_fact f ON f.fact_key=j.root_key AND f.status='verified_direct'"""
     total = session.scalar(text(f"{relation} SELECT count(*) {join} WHERE {where}"), params)
     records = rows(session, f"""{relation} SELECT v.variety_id AS id,v.variety_name AS name,v.variety_type,
         v.source_variety_id AS source_id,COALESCE(v.trial_names,ARRAY[]::text[]) || COALESCE(v.former_names,ARRAY[]::text[]) AS aliases,
-        s.node_count,s.edge_count,s.max_depth,s.fully_expanded,
-        CASE WHEN s.pedigree_snapshot_id IS NULL THEN 'pending_verification' ELSE 'verified' END AS pedigree_status
+        COALESCE(s.node_count,jsonb_array_length(f.fragment->'nodes')) AS node_count,
+        COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges')) AS edge_count,s.max_depth,s.fully_expanded,
+        CASE WHEN s.pedigree_snapshot_id IS NOT NULL THEN 'verified' WHEN f.fact_key IS NOT NULL THEN 'direct_collected' ELSE 'pending_verification' END AS pedigree_status
         {join} WHERE {where}
         ORDER BY CASE WHEN lower(v.variety_name)=lower(:exact) THEN 0 ELSE 1 END,v.variety_name,v.variety_id
         LIMIT :limit OFFSET :offset""", params)
@@ -131,6 +140,19 @@ def pedigree_graph(session, variety_id):
         fully_expanded,crawled_at,source_url FROM agent_query.ricedata__rice_pedigree_snapshot
         WHERE variety_id=:id AND source_verified ORDER BY crawled_at DESC,pedigree_snapshot_id DESC LIMIT 1""", {"id": variety_id})
     if not snapshots:
+        try:direct=load_graph(session,varieties[0]['source_id'])
+        except ValueError as exc:raise HTTPException(409,'系谱关系超过安全展示范围，本次未截断后冒充完整系谱。') from exc
+        if direct and direct['nodes']:
+            linked=rows(session,"SELECT source_variety_id,variety_name,variety_id FROM agent_query.ricedata__rice_variety WHERE source_variety_id=ANY(:ids)",{'ids':list({n['source_id'] for n in direct['nodes'] if n['source_id']})})
+            dossiers={(str(n['source_variety_id']),n['variety_name']):n['variety_id'] for n in linked}
+            for node in direct['nodes']:node['variety_id']=dossiers.get((node['source_id'],node['name']))
+            snapshot=dict(id='direct:'+str(variety_id),fully_expanded=direct['fully_expanded'],node_count=len(direct['nodes']),
+                          edge_count=len(direct['edges']),crawled_at=direct['collected_at'],source_url=varieties[0]['source_url'],mode='direct_relations')
+            result=serialize_graph(varieties[0],snapshot,direct['nodes'],direct['edges'])
+            result['warnings']=direct['warnings']+result['warnings']
+            result['scope']='直接亲本关系来自原站证据；祖先由已采集关系在本地展开。未采集、名称缺失、关系冲突与回环不冒充完整系谱。'
+            result['relation_mode']='direct_relations';result['missing_count']=direct['missing_count'];result['blocked_relation_count']=direct['blocked_relation_count']
+            return result
         result=serialize_graph(varieties[0], None, [], [])
         result["warnings"]=["该品种系谱正在按原站重新完整采集和校验，暂不展示未经核验的旧关系；不表示没有亲本。"]
         return result

@@ -170,7 +170,7 @@ class CollectionDeferred(Exception):
 
 
 def collect(source_id, limit=10000, delay=.5, *, resume=None, on_progress=None,
-            slice_seconds=None, slice_expansions=None, before_request=None):
+            slice_seconds=None, slice_expansions=None, before_request=None, direct_only=False):
     url = f"https://www.ricedata.cn/variety/pedigree.aspx?id={source_id}&fromid="
     started=time.monotonic()
     if resume and resume.get('url')!=url:
@@ -215,18 +215,31 @@ def collect(source_id, limit=10000, delay=.5, *, resume=None, on_progress=None,
                 raise ValueError('Source exceeds occurrence bound; no import')
             state=dict(url=url,html=html,expanded=sorted(expanded),cookies=client.cookies.get_dict(),
                        network_seconds=network_seconds,parse_seconds=parse_seconds)
+            eligible=list(pending)
+            if direct_only:
+                eligible=[]
+                for index,argument in zip((i for i,n in enumerate(records) if n['pending_expansion']),pending):
+                    if index==0:
+                        eligible.append(argument);continue
+                    if records[index]['source_id']:continue
+                    ancestor=records[index]['parent'];inside=True
+                    while ancestor is not None and ancestor!=0:
+                        if records[ancestor]['source_id']:inside=False;break
+                        ancestor=records[ancestor]['parent']
+                    if inside:eligible.append(argument)
             metric=dict(expansions=len(expanded),source_occurrences=len(records),pending_branches=len(pending),
                         page_bytes=len(html.encode()),network_seconds=round(network_seconds,3),
                         parse_seconds=round(parse_seconds,3),slice_seconds=round(time.monotonic()-started,3),
                         next_branch=pending[0] if pending else None)
+            if direct_only:metric['pending_direct_branches']=len(eligible)
             if on_progress:
                 on_progress(state,metric)
-            if not pending:
+            if not eligible:
                 return url, records, html
             if ((slice_seconds is not None and time.monotonic()-started>=slice_seconds) or
                 (slice_expansions is not None and len(expanded)-initial_expansions>=slice_expansions)):
                 raise CollectionDeferred(state)
-            argument = pending[0]
+            argument = eligible[0]
             if argument in expanded or len(expanded) >= limit:
                 raise ValueError("Expansion incomplete or exceeds bound; no import")
             previous=paths

@@ -9,6 +9,16 @@ spec.loader.exec_module(refresh)
 
 
 class RefreshTests(unittest.TestCase):
+    def test_direct_only_stops_at_positive_material_frontier_and_cannot_publish_full(self):
+        before='''<div id="pedigree"><table><tr><td><a href="javascript:__doPostBack('pedigree','t1')"><img alt="展开"></a></td><td><a id="pedigreet0" href="varis/1.htm">根</a></td></tr></table></div>'''
+        after=before.replace('展开','折叠').replace('</div>','''<table><tr><td></td><td><a href="javascript:__doPostBack('pedigree','t1\\\\2')"><img alt="展开"></a></td><td><a id="pedigreet1" href="varis/2.htm">亲本</a></td></tr></table></div>''')
+        with patch.object(refresh.requests,'Session') as factory,patch.object(refresh.time,'sleep'):
+            client=factory.return_value.__enter__.return_value
+            client.get.return_value.content=before.encode();client.post.return_value.content=after.encode()
+            _,records,_=refresh.collect(1,direct_only=True)
+            self.assertEqual(client.post.call_count,1)
+            self.assertTrue(records[1]['pending_expansion'])
+            with self.assertRaises(ValueError):refresh.save_snapshot(None,1,'test',records)
     def test_one_document_parse_per_response(self):
         html='<div id="pedigree"><table><tr><td></td><td><a id="pedigreet0" href="varis/1.htm">根</a></td></tr></table></div>'
         with patch.object(refresh.requests,'Session') as factory,patch.object(refresh.time,'sleep'),patch.object(refresh,'parse_source',wraps=refresh.parse_source) as parse:
