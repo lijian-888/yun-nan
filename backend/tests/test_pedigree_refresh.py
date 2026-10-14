@@ -66,12 +66,14 @@ class RefreshTests(unittest.TestCase):
                  dict(name="A",source_id=None,parent=1),
                  dict(name="C57",source_id="57",parent=0),
                  dict(name="B",source_id=None,parent=3),
-                 dict(name="C57",source_id="57",parent=0),
-                 dict(name="A",source_id=None,parent=5)]
+                 dict(name="另一路",source_id="9",parent=0),
+                 dict(name="C57",source_id="57",parent=5),
+                 dict(name="A",source_id=None,parent=6)]
         canonical,edges=refresh.snapshot_plan(records)
         self.assertNotEqual(canonical[1],canonical[3])
-        self.assertEqual(canonical[1],canonical[5])
-        self.assertEqual(canonical[2],canonical[6])
+        self.assertEqual(canonical[1],canonical[6])
+        self.assertEqual(canonical[2],canonical[7])
+        refresh.validate_plan(records,canonical,edges)
 
     def test_missing_source_is_error_not_empty_success(self):
         with self.assertRaises(ValueError):
