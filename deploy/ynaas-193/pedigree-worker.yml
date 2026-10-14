@@ -4,6 +4,7 @@ services:
     profiles: [pedigree-direct]
     command: [python, /app/scripts/collect_ricedata_direct.py, --state-dir, /data/research/pedigree-direct, --original-state, /data/research/pedigree-rebuild]
     environment:
+      PYTHONPATH: /app
       MIGRATION_DATABASE_URL: postgresql+psycopg://rice:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ynaas_rice_ai
       PYTHONUNBUFFERED: "1"
     volumes:
