@@ -188,9 +188,9 @@ export function catalogCircleLayout(catalog, group, records) {
 export function fanLabel(node, scale) {
   // Fit names to actual on-screen sector space. Dense all-tree overview never
   // overlays names; the full name remains available in title and node details.
-  const font=Math.max(12,13/scale);
-  const screenFont=font*scale;
-  let capacity=node.depth?Math.floor((node.inner+(node.outer-node.inner)*.35)*(node.end-node.start)*scale/screenFont)-1:Math.floor(node.outer*2*scale/screenFont);
+  let font=Math.max(12,13/scale);
+  let screenFont=font*scale;
+  let capacity=node.depth?Math.floor((node.inner+(node.outer-node.inner)*.35)*(node.end-node.start)*scale/screenFont)-1:node.outer*2*scale/screenFont-.3;
   const value=Array.from(node.name||'');
   const glyphWidth=character=>/[\u0000-\u007f]/.test(character)?.6:1;
   const textWidth=value.reduce((sum,character)=>sum+glyphWidth(character),0);
@@ -198,10 +198,15 @@ export function fanLabel(node, scale) {
   let radial=false;
   // A long label can fit along the ring thickness even if it cannot fit across
   // the arc. Reserve the outer area for the expansion control.
-  if(node.depth&&(capacity<2||rows<1||(capacity<5&&textWidth>capacity))){
+  if(node.depth&&(capacity<2||rows<1||textWidth>capacity*rows||(capacity<5&&textWidth>capacity))){
     radial=true;
     capacity=Math.floor((node.outer-node.inner-30)*scale/screenFont);
     rows=Math.min(2,Math.floor(((node.inner+node.outer)/2)*(node.end-node.start)*scale/(screenFont*1.3)));
+    if(capacity*rows<textWidth){
+      font=Math.max(10,10/scale);screenFont=font*scale;
+      capacity=Math.floor((node.outer-node.inner-30)*scale/screenFont);
+      rows=Math.min(2,Math.floor(((node.inner+node.outer)/2)*(node.end-node.start)*scale/(screenFont*1.3)));
+    }
   }
   if(capacity<2||rows<1)return {lines:[],font,radial};
   const limit=Math.min(18,capacity);
