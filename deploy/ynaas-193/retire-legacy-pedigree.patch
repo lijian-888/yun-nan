@@ -1,0 +1,9 @@
+--- a/sync_to_postgres.py
++++ b/sync_to_postgres.py
+@@ -691,5 +691,1 @@
+-                insert_pedigree(
+-                    cursor, int(record["variety_id"]), pg_variety_id, record["name"],
+-                    record["crawled_at"], nodes, outgoing, initial_status, expanded_ids,
+-                    linked_varieties,
+-                )
++                # Retired: publish pedigrees only via the verified source-context collector.

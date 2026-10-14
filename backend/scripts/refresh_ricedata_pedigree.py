@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -47,7 +48,8 @@ def parse_tree(html, source_url):
         records.append(dict(name=name, depth=depth, parent=parent,
                             source_id=linked.group(1) if linked else None,
                             url=urljoin(source_url, href) if linked else source_url,
-                            expandable=expandable))
+                            expandable=expandable,
+                            pending_expansion=bool(expandable and toggle.find("img").get("alt", "").startswith("展开"))))
         stack[depth] = len(records)-1
         stack = {d: i for d, i in stack.items() if d <= depth}
     if not records or sum(n["depth"] == 0 for n in records) != 1:
@@ -55,28 +57,54 @@ def parse_tree(html, source_url):
     return records, pending
 
 
-def collect(source_id, limit=150):
+def decode_response(response):
+    response.raise_for_status()
+    try:
+        return response.content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return response.content.decode("gb18030")
+
+
+def occurrence_paths(records):
+    paths, result = {}, {}
+    for index,node in enumerate(records):
+        path=(paths[node["parent"]] if node["parent"] is not None else ())+(node["name"],)
+        paths[index]=path
+        result[path]=result.get(path,0)+1
+    return result
+
+
+def collect(source_id, limit=10000, delay=.5):
     url = f"https://www.ricedata.cn/variety/pedigree.aspx?id={source_id}&fromid="
     with requests.Session() as client:
         response = client.get(url, timeout=20)
         response.raise_for_status()
-        response.encoding = "utf-8"
-        html = response.text
+        html = decode_response(response)
         expanded = set()
         for _ in range(limit+1):
             records, pending = parse_tree(html, url)
             if not pending:
                 return url, records, html
             argument = pending[0]
-            if argument in expanded or len(expanded) >= limit or len(records) > 1500:
+            if argument in expanded or len(expanded) >= limit or len(records) > 20000:
                 raise ValueError("Expansion incomplete or exceeds bound; no import")
+            previous=occurrence_paths(records)
             soup = BeautifulSoup(html, "html.parser")
             fields = {n["name"]: n.get("value", "") for n in soup.select("input[name]")}
             fields.update(__EVENTTARGET="pedigree", __EVENTARGUMENT=argument)
-            response = client.post(url, data=fields, timeout=20)
-            response.raise_for_status()
-            response.encoding = "utf-8"
-            html = response.text
+            for attempt in range(3):
+                time.sleep(delay+attempt)
+                try:
+                    response = client.post(url, data=fields, timeout=30)
+                    html = decode_response(response)
+                    break
+                except (requests.RequestException,UnicodeError):
+                    if attempt == 2:
+                        raise
+            next_records,_=parse_tree(html,url)
+            current=occurrence_paths(next_records)
+            if any(current.get(path,0)<count for path,count in previous.items()):
+                raise ValueError("Expansion lost an existing branch; no import")
             expanded.add(argument)
 
 
@@ -109,17 +137,20 @@ def snapshot_plan(records):
 
 
 def save_snapshot(connection, variety_id, url, records):
-    root = connection.execute(text("SELECT variety_name FROM ricedata.rice_variety WHERE variety_id=:id"),
-                              {"id": variety_id}).scalar_one()
-    if records[0]["name"] != root:
-        raise ValueError("Source root differs from selected variety")
+    if not records or any("pending_expansion" not in n or n["pending_expansion"] for n in records):
+        raise ValueError("No proof that every source expansion completed")
+    source = connection.execute(text("SELECT source_variety_id FROM ricedata.rice_variety WHERE variety_id=:id"),
+                                {"id": variety_id}).scalar_one()
+    if str(records[0]["source_id"]) != str(source):
+        raise ValueError("Source root identity differs from selected variety")
     canonical,edges = snapshot_plan(records)
+    digest=hashlib.sha256(json.dumps(records,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     snapshot = connection.execute(text("""
         INSERT INTO ricedata.rice_pedigree_snapshot
-        (variety_id,source_url,fully_expanded,node_count,edge_count,max_depth)
-        VALUES (:id,:url,true,:nodes,:edges,:depth) RETURNING pedigree_snapshot_id
+        (variety_id,source_url,fully_expanded,node_count,edge_count,max_depth,source_verified,source_evidence_sha256)
+        VALUES (:id,:url,true,:nodes,:edges,:depth,true,:digest) RETURNING pedigree_snapshot_id
     """), dict(id=variety_id, url=url, nodes=len(set(canonical.values())), edges=len(edges),
-               depth=max(n["depth"] for n in records))).scalar_one()
+               depth=max(n["depth"] for n in records),digest=digest)).scalar_one()
     ids = {}
     for index, node in enumerate(records):
         if canonical[index] != index:
@@ -148,6 +179,12 @@ def save_snapshot(connection, variety_id, url, records):
                 (pedigree_snapshot_id,child_node_id,parent_node_id,parent_role,display_order)
                 VALUES (:snapshot,:child,:parent,'parent',:position)
             """), dict(snapshot=snapshot,child=ids[child],parent=ids[parent],position=position))
+    counts=connection.execute(text("""SELECT
+        (SELECT count(*) FROM ricedata.rice_pedigree_node WHERE pedigree_snapshot_id=:id) AS nodes,
+        (SELECT count(*) FROM ricedata.rice_pedigree_edge WHERE pedigree_snapshot_id=:id) AS edges
+    """),{"id":snapshot}).mappings().one()
+    if counts["nodes"] != len(ids) or counts["edges"] != len(edges):
+        raise ValueError("Saved graph differs from checked source plan")
     return snapshot
 
 
@@ -157,8 +194,9 @@ def main():
     parser.add_argument("--source-id", type=int, required=True)
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--max-expansions",type=int,default=10000)
     args = parser.parse_args()
-    url, records, html = collect(args.source_id)
+    url, records, html = collect(args.source_id,limit=args.max_expansions)
     args.evidence_dir.mkdir(parents=True, exist_ok=False)
     (args.evidence_dir/"source.html").write_text(html, encoding="utf-8")
     (args.evidence_dir/"nodes.json").write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")

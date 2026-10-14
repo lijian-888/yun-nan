@@ -144,7 +144,7 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
                        pedigree_snapshot_id, variety_id, source_url, fully_expanded,
                        node_count, edge_count, max_depth
                 FROM ricedata.rice_pedigree_snapshot
-                WHERE variety_id = ANY(CAST(:variety_ids AS bigint[]))
+                WHERE variety_id = ANY(CAST(:variety_ids AS bigint[])) AND source_verified
                 ORDER BY variety_id, crawled_at DESC, pedigree_snapshot_id DESC
             ), walk AS (
                 SELECT s.variety_id, s.pedigree_snapshot_id, s.source_url,

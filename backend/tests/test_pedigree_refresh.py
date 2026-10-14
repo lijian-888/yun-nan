@@ -8,6 +8,20 @@ spec.loader.exec_module(refresh)
 
 
 class RefreshTests(unittest.TestCase):
+    def test_pending_source_cannot_be_published(self):
+        for records in [[dict(name="x",pending_expansion=True)],[dict(name="x")],[]]:
+            with self.assertRaises(ValueError):
+                refresh.save_snapshot(None,1,"https://www.ricedata.cn",records)
+
+    def test_complex_cross_postback_is_followed_without_guessing_components(self):
+        html="""<div id="pedigree"><table><tr><td><a href="javascript:__doPostBack('pedigree','t123')"><img alt="折叠 根"/></a></td><td><a id="pedigreet0" href="varis/123.htm">根</a></td></tr></table>
+        <table><tr><td></td><td><a href="javascript:__doPostBack('pedigree','t123\\\\1/2//3///0/0')"><img alt="展开 组合"/></a></td><td><a id="pedigreet1" href="javascript:x">组合</a></td></tr></table></div>"""
+        nodes,pending=refresh.parse_tree(html,"https://www.ricedata.cn")
+        self.assertEqual(len(pending),1)
+        self.assertTrue(nodes[1]["pending_expansion"])
+        self.assertIsNone(nodes[1]["source_id"])
+        self.assertIn("1/2//3///0/0",pending[0])
+
     def test_zero_postback_keeps_displayed_name_and_branch(self):
         html = """<div id="pedigree"><table><tr><td></td><td><a id="pedigreet0" href="varis/619325.htm">02F6-155</a></td></tr></table>
         <table><tr><td><table width="20"><tr><td></td></tr></table></td><td></td><td><a id="pedigreet1" href="javascript:x">98P95</a></td></tr></table></div>"""

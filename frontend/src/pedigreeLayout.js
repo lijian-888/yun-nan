@@ -178,7 +178,7 @@ export function catalogCircleLayout(catalog, group, records) {
     const angle=-Math.PI/2+index*2*Math.PI/items.length;
     const node={...item,id:category?`variety-${item.id}`:`group-${item.code}`,name:item.name,
       variety_id:category?item.id:undefined,group:category?undefined:item.code,kind:category?'catalog-variety':'catalog',circle:true,
-      subtitle:category?(item.edge_count?'已有系谱':'未收录亲本关系'):`${Number(item.count).toLocaleString()} 个品种`,
+      subtitle:category?(item.edge_count?'已有校验系谱':item.pedigree_status==='pending_verification'?'系谱待原站校验':'原站未展示亲本'):`${Number(item.count).toLocaleString()} 个品种`,
       x:cx+radius*Math.cos(angle),y:cy+radius*Math.sin(angle),radius:category?28:42};
     nodes.push(node);edges.push({id:`contains-${node.id}`,from:center,to:node,catalog:true});
   });

@@ -17,7 +17,7 @@ GROUP_SQL = """CASE WHEN strpos(COALESCE(v.variety_type,''),'籼粳')>0 THEN 'mi
     WHEN v.variety_type LIKE '籼%' THEN 'indica' WHEN v.variety_type LIKE '粳%' THEN 'japonica'
     ELSE 'other' END"""
 LATEST_SQL = """SELECT DISTINCT ON (variety_id) variety_id,pedigree_snapshot_id,node_count,edge_count,max_depth,fully_expanded,crawled_at
-    FROM agent_query.ricedata__rice_pedigree_snapshot ORDER BY variety_id,crawled_at DESC,pedigree_snapshot_id DESC"""
+    FROM agent_query.ricedata__rice_pedigree_snapshot WHERE source_verified ORDER BY variety_id,crawled_at DESC,pedigree_snapshot_id DESC"""
 
 
 def rows(session, sql, params=None):
@@ -58,7 +58,9 @@ def list_varieties(session, keyword="", group="", only_pedigree=False, page=1, p
     total = session.scalar(text(f"{relation} SELECT count(*) {join} WHERE {where}"), params)
     records = rows(session, f"""{relation} SELECT v.variety_id AS id,v.variety_name AS name,v.variety_type,
         v.source_variety_id AS source_id,COALESCE(v.trial_names,ARRAY[]::text[]) || COALESCE(v.former_names,ARRAY[]::text[]) AS aliases,
-        s.node_count,s.edge_count,s.max_depth,s.fully_expanded {join} WHERE {where}
+        s.node_count,s.edge_count,s.max_depth,s.fully_expanded,
+        CASE WHEN s.pedigree_snapshot_id IS NULL THEN 'pending_verification' ELSE 'verified' END AS pedigree_status
+        {join} WHERE {where}
         ORDER BY CASE WHEN lower(v.variety_name)=lower(:exact) THEN 0 ELSE 1 END,v.variety_name,v.variety_id
         LIMIT :limit OFFSET :offset""", params)
     return {"records": records, "total": total, "page": page, "page_size": page_size,
@@ -124,9 +126,11 @@ def pedigree_graph(session, variety_id):
         return None
     snapshots = rows(session, """SELECT pedigree_snapshot_id AS id,variety_id,node_count,edge_count,max_depth,
         fully_expanded,crawled_at,source_url FROM agent_query.ricedata__rice_pedigree_snapshot
-        WHERE variety_id=:id ORDER BY crawled_at DESC,pedigree_snapshot_id DESC LIMIT 1""", {"id": variety_id})
+        WHERE variety_id=:id AND source_verified ORDER BY crawled_at DESC,pedigree_snapshot_id DESC LIMIT 1""", {"id": variety_id})
     if not snapshots:
-        return serialize_graph(varieties[0], None, [], [])
+        result=serialize_graph(varieties[0], None, [], [])
+        result["warnings"]=["该品种系谱正在按原站重新完整采集和校验，暂不展示未经核验的旧关系；不表示没有亲本。"]
+        return result
     snapshot = snapshots[0]
     params = {"snapshot": snapshot["id"]}
     nodes = rows(session, """SELECT pedigree_node_id AS id,material_name AS name,node_type AS kind,

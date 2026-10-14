@@ -7,3 +7,4 @@ FROM ${BASE_IMAGE}
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 COPY backend/app /app/app
+COPY backend/scripts /app/scripts
