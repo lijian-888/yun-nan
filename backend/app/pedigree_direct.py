@@ -54,7 +54,14 @@ def assemble(root,facts,limit=5000):
         if not fact:
             missing.add(key);continue
         if fact.get('status')!='verified_direct':
-            conflicts.add(key);continue
+            conflicts.add(key)
+            if key==root and fact.get('fragment',{}).get('nodes'):
+                item=fact['fragment']['nodes'][0]
+                node=dict(item,id=key,kind='variety',variety_id=None,is_root=True,was_expandable=True,expansion_succeeded=False,recorded_depth=0)
+                if node['name'].strip() in ('0','?','？') or not node['name'].strip():
+                    node['raw_name']=node['name'];node['name']='亲本名称待核实';node['kind']='unknown'
+                nodes[key]=node
+            continue
         value=fact['fragment']
         for item in value['nodes']:
             node=dict(item)

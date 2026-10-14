@@ -43,5 +43,13 @@ class DirectTests(unittest.TestCase):
         self.assertEqual(g['conflict_count'],2)
         self.assertFalse(g['fully_expanded'])
 
+    def test_conflicted_root_keeps_its_name_and_reports_conflict(self):
+        f=fragment([node('已知品种','1'),node('P','2',0)])
+        g=assemble(f['root'],{f['root']:dict(fragment=f,status='conflict')})
+        self.assertEqual(g['nodes'][0]['name'],'已知品种')
+        self.assertEqual(g['edges'],[])
+        self.assertEqual(g['conflict_count'],1)
+        self.assertFalse(g['fully_expanded'])
+
 
 if __name__=='__main__':unittest.main()
