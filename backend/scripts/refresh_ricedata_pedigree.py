@@ -5,6 +5,7 @@ The displayed label is authoritative; postback value 0 is never a name/variety I
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -17,8 +18,15 @@ from bs4 import BeautifulSoup
 from sqlalchemy import create_engine, text
 
 
-def parse_tree(html, source_url):
-    soup = BeautifulSoup(html, "html.parser")
+HTML_PARSER="lxml" if importlib.util.find_spec("lxml") else "html.parser"
+
+
+def source_document(html):
+    return BeautifulSoup(html, HTML_PARSER)
+
+
+def parse_tree(html, source_url, document=None):
+    soup = document if document is not None else source_document(html)
     tree = soup.find(id="pedigree")
     if tree is None:
         raise ValueError("Source tree missing")
@@ -78,51 +86,78 @@ def occurrence_paths(records):
     return result
 
 
-def collect(source_id, limit=10000, delay=.5):
+class CollectionDeferred(Exception):
+    """Saved partial source state, never a publishable snapshot."""
+    def __init__(self,state):
+        super().__init__('Source collection yielded; resume exact page state')
+        self.state=state
+
+
+def collect(source_id, limit=10000, delay=.5, *, resume=None, on_progress=None,
+            slice_seconds=None, slice_expansions=None, before_request=None):
     url = f"https://www.ricedata.cn/variety/pedigree.aspx?id={source_id}&fromid="
+    started=time.monotonic()
+    if resume and resume.get('url')!=url:
+        raise ValueError('Checkpoint belongs to another source')
+    expanded=set(resume.get('expanded',[])) if resume else set()
+    initial_expansions=len(expanded)
+    network_seconds=resume.get('network_seconds',0) if resume else 0
+    parse_seconds=resume.get('parse_seconds',0) if resume else 0
+    previous=None
     with requests.Session() as client:
-        for attempt in range(3):
-            time.sleep(delay+attempt)
-            response=None
-            try:
-                response=client.get(url,timeout=30)
-                response.raise_for_status()
-                break
-            except requests.RequestException:
-                if response is not None and response.status_code in (403,429):
-                    raise
-                if attempt==2:
-                    raise
-        response.raise_for_status()
-        html = decode_response(response)
-        expanded = set()
-        for _ in range(limit+1):
-            records, pending = parse_tree(html, url)
-            if not pending:
-                return url, records, html
-            argument = pending[0]
-            if argument in expanded or len(expanded) >= limit or len(records) > 20000:
-                raise ValueError("Expansion incomplete or exceeds bound; no import")
-            previous=occurrence_paths(records)
-            soup = BeautifulSoup(html, "html.parser")
-            fields = {n["name"]: n.get("value", "") for n in soup.select("input[name]")}
-            fields.update(__EVENTTARGET="pedigree", __EVENTARGUMENT=argument)
+        def request(method,**kwargs):
+            nonlocal network_seconds
             for attempt in range(3):
                 time.sleep(delay+attempt)
+                if before_request:
+                    before_request()
                 response=None
+                clock=time.monotonic()
                 try:
-                    response = client.post(url, data=fields, timeout=30)
-                    html = decode_response(response)
-                    break
+                    response=getattr(client,method)(url,timeout=30,**kwargs)
+                    return decode_response(response)
                 except (requests.RequestException,UnicodeError):
                     if response is not None and response.status_code in (403,429):
                         raise
-                    if attempt == 2:
+                    if attempt==2:
                         raise
-            next_records,_=parse_tree(html,url)
-            current=occurrence_paths(next_records)
-            if any(current.get(path,0)<count for path,count in previous.items()):
-                raise ValueError("Expansion lost an existing branch; no import")
+                finally:
+                    network_seconds+=time.monotonic()-clock
+        if resume:
+            client.cookies.update(resume.get('cookies',{}))
+            html=resume['html']
+        else:
+            html=request('get')
+        while True:
+            clock=time.monotonic()
+            document=source_document(html)
+            records,pending=parse_tree(html,url,document)
+            paths=occurrence_paths(records)
+            if previous is not None and any(paths.get(path,0)<count for path,count in previous.items()):
+                raise ValueError('Expansion lost an existing branch; no import')
+            fields={n['name']:n.get('value','') for n in document.select('input[name]')}
+            parse_seconds+=time.monotonic()-clock
+            if len(records)>20000:
+                raise ValueError('Source exceeds occurrence bound; no import')
+            state=dict(url=url,html=html,expanded=sorted(expanded),cookies=client.cookies.get_dict(),
+                       network_seconds=network_seconds,parse_seconds=parse_seconds)
+            metric=dict(expansions=len(expanded),source_occurrences=len(records),pending_branches=len(pending),
+                        page_bytes=len(html.encode()),network_seconds=round(network_seconds,3),
+                        parse_seconds=round(parse_seconds,3),slice_seconds=round(time.monotonic()-started,3),
+                        next_branch=pending[0] if pending else None)
+            if on_progress:
+                on_progress(state,metric)
+            if not pending:
+                return url, records, html
+            if ((slice_seconds is not None and time.monotonic()-started>=slice_seconds) or
+                (slice_expansions is not None and len(expanded)-initial_expansions>=slice_expansions)):
+                raise CollectionDeferred(state)
+            argument = pending[0]
+            if argument in expanded or len(expanded) >= limit:
+                raise ValueError("Expansion incomplete or exceeds bound; no import")
+            previous=paths
+            fields.update(__EVENTTARGET="pedigree", __EVENTARGUMENT=argument)
+            html=request('post',data=fields)
             expanded.add(argument)
 
 

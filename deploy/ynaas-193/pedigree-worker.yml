@@ -2,7 +2,19 @@ services:
   pedigree-rebuild:
     image: ynaas-trial-api:${RELEASE_TAG:?Set RELEASE_TAG}
     profiles: [pedigree-rebuild]
-    command: [python, /app/scripts/rebuild_ricedata_pedigrees.py, --state-dir, /data/research/pedigree-rebuild]
+    command: [python, /app/scripts/rebuild_ricedata_pedigrees.py, --state-dir, /data/research/pedigree-rebuild, --lane, normal]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://rice:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ynaas_rice_ai
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - research_data:/data/research
+    restart: on-failure:3
+    mem_limit: 1g
+    cpus: 0.5
+  pedigree-complex:
+    image: ynaas-trial-api:${RELEASE_TAG:?Set RELEASE_TAG}
+    profiles: [pedigree-rebuild]
+    command: [python, /app/scripts/rebuild_ricedata_pedigrees.py, --state-dir, /data/research/pedigree-rebuild, --lane, complex]
     environment:
       MIGRATION_DATABASE_URL: postgresql+psycopg://rice:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ynaas_rice_ai
       PYTHONUNBUFFERED: "1"

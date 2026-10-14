@@ -9,6 +9,34 @@ spec.loader.exec_module(refresh)
 
 
 class RefreshTests(unittest.TestCase):
+    def test_one_document_parse_per_response(self):
+        html='<div id="pedigree"><table><tr><td></td><td><a id="pedigreet0" href="varis/1.htm">根</a></td></tr></table></div>'
+        with patch.object(refresh.requests,'Session') as factory,patch.object(refresh.time,'sleep'),patch.object(refresh,'BeautifulSoup',wraps=refresh.BeautifulSoup) as soup:
+            factory.return_value.__enter__.return_value.get.return_value.content=html.encode()
+            progress=[]
+            refresh.collect(1,on_progress=lambda state,metric: progress.append(metric))
+            self.assertEqual(soup.call_count,1)
+            self.assertEqual(progress[-1]['pending_branches'],0)
+
+    def test_slice_resumes_exact_page_without_publishing_partial(self):
+        def page(opened):
+            rows='<table><tr><td><a href="javascript:__doPostBack(\'pedigree\',\'t1\')"><img alt="'+('折叠' if opened else '展开')+'"/></a></td><td><a id="pedigreet0" href="varis/1.htm">根</a></td></tr></table>'
+            if opened:
+                rows+='<table><tr><td></td><td></td><td><a id="pedigreet1">已知亲本</a></td></tr></table>'
+            return '<div id="pedigree">'+rows+'</div>'
+        with patch.object(refresh.requests,'Session') as factory,patch.object(refresh.time,'sleep'):
+            client=factory.return_value.__enter__.return_value
+            client.get.return_value.content=page(False).encode()
+            client.post.return_value.content=page(True).encode()
+            client.cookies.get_dict.return_value={}
+            with self.assertRaises(refresh.CollectionDeferred) as deferred:
+                refresh.collect(1,slice_expansions=0)
+            self.assertEqual(client.post.call_count,0)
+            _,records,_=refresh.collect(1,resume=deferred.exception.state)
+            self.assertEqual(client.get.call_count,1)
+            self.assertEqual([r['name'] for r in records],['根','已知亲本'])
+            self.assertFalse(any(r['pending_expansion'] for r in records))
+
     def test_duplicate_parent_positions_are_not_erased(self):
         records=[dict(name="根",source_id="1",parent=None),
                  dict(name="同一亲本",source_id="2",parent=0),
