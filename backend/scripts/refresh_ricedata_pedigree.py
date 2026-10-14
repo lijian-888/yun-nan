@@ -38,10 +38,14 @@ def parse_tree(html, source_url):
         parent = stack.get(depth-1) if depth else None
         toggle = cells[-2].find("a")
         expandable = bool(toggle and toggle.find("img"))
+        if expandable and not toggle.find("img").get("alt","").startswith(("展开","折叠")):
+            raise ValueError("Unknown source expansion state")
         if expandable and toggle.find("img").get("alt", "").startswith("展开"):
             match = re.search(r"__doPostBack\('pedigree','([^']+)'\)", toggle.get("href", ""))
             if not match:
                 raise ValueError("Expansion argument missing")
+            if not match[1].startswith("t"):
+                raise ValueError("Unexpected source expansion action")
             pending.append(match[1].replace("\\\\", "\\"))
         href = anchor.get("href", "")
         linked = re.search(r"^varis/([1-9]\d*)\.htm", href)
