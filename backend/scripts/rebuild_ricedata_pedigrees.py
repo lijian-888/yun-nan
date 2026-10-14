@@ -50,10 +50,14 @@ def main():
     if args.slice_seconds<=0 or args.slice_expansions<=0:
         parser.error('Slice limits must be positive')
     args.state_dir.mkdir(parents=True,exist_ok=True)
+    with (args.state_dir/f'worker-{args.lane}.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        run(args)
+
+
+def run(args):
     deferred_dir=args.state_dir/'deferred'
     deferred_dir.mkdir(exist_ok=True)
-    lock=(args.state_dir/f'worker-{args.lane}.lock').open('a')
-    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     engine=create_engine(os.environ['MIGRATION_DATABASE_URL'],pool_pre_ping=True)
     with engine.connect() as conn:
         varieties=[dict(r) for r in conn.execute(text('''

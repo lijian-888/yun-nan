@@ -35,7 +35,7 @@ class WorkerTests(unittest.TestCase):
         def collect(source_id,**kwargs):
             calls.append((source_id,bool(kwargs['resume'])))
             state=dict(url='test',html='test',expanded=[])
-            kwargs['on_progress'](state,dict(expansions=0,pending_branches=1))
+            kwargs['on_progress'](state,dict(expansions=0,pending_branches=int(source_id=='1' and not kwargs['resume'])))
             if source_id=='1' and not kwargs['resume']:
                 raise worker.CollectionDeferred(state)
             return 'test',[dict(name=source_id)],'test'
