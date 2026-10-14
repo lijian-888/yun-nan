@@ -1,6 +1,6 @@
 services:
   pedigree-rebuild:
-    image: ynaas-trial-api:${RELEASE_TAG:?Set RELEASE_TAG}
+    image: ynaas-trial-api:${PEDIGREE_RELEASE_TAG:-${RELEASE_TAG:?Set RELEASE_TAG}}
     profiles: [pedigree-rebuild]
     command: [python, /app/scripts/rebuild_ricedata_pedigrees.py, --state-dir, /data/research/pedigree-rebuild, --lane, normal]
     environment:
@@ -12,7 +12,7 @@ services:
     mem_limit: 1g
     cpus: 0.5
   pedigree-complex:
-    image: ynaas-trial-api:${RELEASE_TAG:?Set RELEASE_TAG}
+    image: ynaas-trial-api:${PEDIGREE_RELEASE_TAG:-${RELEASE_TAG:?Set RELEASE_TAG}}
     profiles: [pedigree-rebuild]
     command: [python, /app/scripts/rebuild_ricedata_pedigrees.py, --state-dir, /data/research/pedigree-rebuild, --lane, complex]
     environment:
