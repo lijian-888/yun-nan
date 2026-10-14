@@ -202,7 +202,7 @@ export function fanLabel(node, scale) {
     radial=true;
     capacity=Math.floor((node.outer-node.inner-30)*scale/screenFont);
     rows=Math.min(2,Math.floor(((node.inner+node.outer)/2)*(node.end-node.start)*scale/(screenFont*1.3)));
-    if(capacity*rows<textWidth){
+    if(capacity*rows<textWidth+1.5){
       font=Math.max(10,10/scale);screenFont=font*scale;
       capacity=Math.floor((node.outer-node.inner-30)*scale/screenFont);
       rows=Math.min(2,Math.floor(((node.inner+node.outer)/2)*(node.end-node.start)*scale/(screenFont*1.3)));

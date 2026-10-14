@@ -164,6 +164,9 @@ test('long known name switches to radial text instead of a blank sector',()=>{
   assert.equal(label.radial,true);
   assert.equal(label.lines.join(''),node.name);
   assert.equal(label.truncated,false);
+  const overview=fanLabel({...node,start:-1.9634954084936207,end:-1.7671458676442586},.63);
+  assert.equal(overview.lines.join(''),node.name);
+  assert.equal(overview.truncated,false);
 });
 test('real public server snapshots: complete fans keep every saved source relation',{skip:!process.env.PEDIGREE_PREVIEW_FIXTURE},()=>{
   const fixture=JSON.parse(readFileSync(process.env.PEDIGREE_PREVIEW_FIXTURE,'utf8'));
