@@ -179,7 +179,9 @@ def _variety_evidence(session: Session, question: str, include_pedigree: bool) -
     return {
         "catalog_total": int(total),
         "match_mode": "question_exact_name_or_alias" if varieties else "not_found",
-        "message": "未找到与问题中的品种名称或别名匹配的记录。" if not varieties else "",
+        "message": ("未找到与问题中的品种名称或别名匹配的记录。" if not varieties else
+                    "该品种系谱尚未通过原站完整采集校验，暂不使用旧关系；不能解释为没有亲本。"
+                    if include_pedigree and not pedigrees else ""),
         "varieties": varieties,
         "approvals": approvals,
         "pedigrees": pedigrees,
