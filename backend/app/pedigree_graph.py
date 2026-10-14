@@ -126,6 +126,7 @@ def serialize_graph(variety, snapshot, nodes, edges):
         if not original_name.strip() or original_name.strip() in ('0','?','？'):
             node['raw_name']=original_name;node['name']='亲本名称待核实';node['kind']='unknown'
             warnings.append('原站存在亲本名称缺失，已标注待核实，没有填造名称。')
+            if snapshot:snapshot=dict(snapshot,fully_expanded=False,source_names_complete=False)
         node["source_url"] = public_url(node.get("source_url"))
     variety["source_url"] = public_url(variety.get("source_url"))
     return {"variety": variety, "snapshot": snapshot, "nodes": nodes, "edges": valid, "root_ids": roots,
