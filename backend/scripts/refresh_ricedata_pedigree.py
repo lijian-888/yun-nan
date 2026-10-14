@@ -145,13 +145,40 @@ def snapshot_plan(records):
             canonical[index] = canonical[children[canonical[parent]][position]]
             continue
         identity = signatures[index] if node["source_id"] else ("occurrence",index)
-        canonical[index] = memo.setdefault(identity,index)
+        candidate=memo.setdefault(identity,index)
+        if parent is not None and any(canonical[sibling]==candidate for sibling in children[parent] if sibling<index):
+            # Repeated parents (for example a self-cross) occupy separate source
+            # positions; a unique DB edge must not erase the second occurrence.
+            candidate=index
+        canonical[index]=candidate
     edges = {}
     for index,node in enumerate(records):
         if node["parent"] is not None:
             child,parent = canonical[node["parent"]],canonical[index]
             edges.setdefault((child,parent),children[node["parent"]].index(index))
     return canonical,edges
+
+
+def validate_plan(records,canonical,edges):
+    expected=occurrence_paths(records)
+    adjacency={}
+    for child,parent in edges:
+        adjacency.setdefault(child,[]).append(parent)
+    pending=[(canonical[0],(),())]
+    actual={};visits=0
+    while pending:
+        node,seen,path=pending.pop()
+        if node in seen:
+            raise ValueError("Conversion introduced a cycle")
+        visits+=1
+        if visits>len(records):
+            raise ValueError("Conversion introduced extra source occurrences")
+        full=path+(records[node]["name"],)
+        actual[full]=actual.get(full,0)+1
+        for parent in adjacency.get(node,[]):
+            pending.append((parent,seen+(node,),full))
+    if actual!=expected:
+        raise ValueError("Converted relationships differ from expanded source")
 
 
 def save_snapshot(connection, variety_id, url, records):
@@ -162,6 +189,7 @@ def save_snapshot(connection, variety_id, url, records):
     if str(records[0]["source_id"]) != str(source):
         raise ValueError("Source root identity differs from selected variety")
     canonical,edges = snapshot_plan(records)
+    validate_plan(records,canonical,edges)
     digest=hashlib.sha256(json.dumps(records,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     snapshot = connection.execute(text("""
         INSERT INTO ricedata.rice_pedigree_snapshot

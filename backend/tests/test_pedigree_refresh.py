@@ -9,6 +9,16 @@ spec.loader.exec_module(refresh)
 
 
 class RefreshTests(unittest.TestCase):
+    def test_duplicate_parent_positions_are_not_erased(self):
+        records=[dict(name="根",source_id="1",parent=None),
+                 dict(name="同一亲本",source_id="2",parent=0),
+                 dict(name="同一亲本",source_id="2",parent=0)]
+        canonical,edges=refresh.snapshot_plan(records)
+        self.assertNotEqual(canonical[1],canonical[2])
+        self.assertEqual(len(edges),2)
+        refresh.validate_plan(records,canonical,edges)
+        with self.assertRaises(ValueError):
+            refresh.validate_plan(records,canonical,{(0,1):0})
     def test_network_failure_is_retried_and_never_returns_complete(self):
         with patch.object(refresh.requests,"Session") as factory,patch.object(refresh.time,"sleep"):
             client=factory.return_value.__enter__.return_value
