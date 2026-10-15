@@ -1,5 +1,15 @@
 # 172.16.123.193 云南试用版隔离部署
 
+## 正式域名入口
+
+正式入口为 `https://longyun-yn.e-farmer.cn/`。内网 IP 的 19443 端口仍是网关上游，不能将数据库、容器地址或上游 TLS 配置全局替换为域名。
+
+2026-10-15 已在生产 Compose 文件列表最后追加 `public-domain.yml`，同时统一 API 的令牌签发地址、CORS、受信主机和 Keycloak 的公开地址。后续发布必须保留此覆盖文件，否则旧私有 `.env` 可能恢复 IP 配置。新部署应将 `.env` 的 `PUBLIC_PLATFORM_URL` 和 `PUBLIC_PLATFORM_HOST` 分别设为正式域名 URL 和主机名。
+
+前端域名切换镜像 `ynaas-trial-web:public-domain-20261015` 仅在现有业务镜像上替换登录 URL 并更新相关资源文件名，原业务版本未变化。后续前端发布可设置 `YNAAS_DOMAIN_WEB_IMAGE` 为新镜像；构建必须使用域名 `VITE_KEYCLOAK_URL`。登录客户端已允许域名与旧 IP 回跳，但正式入口和令牌 issuer 均统一使用域名；切换后旧会话可能需要重新登录。
+
+仅重建 `api web keycloak`，不重启采集或数据库。容器地址变化后需检查并 reload 网关 Nginx。验收域名首页、`/api/health`、OIDC 发现中的 issuer 和端点均使用域名，登录表单和静态资源正常；完整账号登录仍需实际用户验证。
+
 此配置专用于与小亿、隆耘同机的试用版。它使用独立 Compose 项目 `ynaas-trial`、独立 Docker 网络和数据卷、独立镜像名，以及未被现有服务占用的 HTTPS 端口 `19443`。PostgreSQL、API、Keycloak、MinIO 和解析服务不发布主机端口。首期基因型导入 Worker 不启动；现有基因数据查询不依赖这个 Worker。
 
 云南试用版业务上不设课题：获批且未停用的账号直接进入院内统一工作台。旧数据库中的默认 `project_id` 仅作内部 RLS/存储兼容标识，不要求新科研账号拥有 `project_member` 记录，也不在网页上显示课题选择。既有成员记录保留，不执行删表或数据迁移。
