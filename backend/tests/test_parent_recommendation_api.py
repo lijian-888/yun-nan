@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -5,7 +6,7 @@ from pydantic import ValidationError
 
 from app.ai_gateway import AIProviderSettings
 from app.parent_goal_parser import parse_parent_goal
-from app.parent_recommendation_api import RecommendationRunPayload
+from app.parent_recommendation_api import RecommendationRunPayload, goal_progress_events
 from app.parent_recommendation_engine import ParentRecommendationEngine
 from app.parent_recommendation_report import recommendation_v2_csv, recommendation_v2_pdf
 from backend.tests.test_parent_recommendation_engine import MemoryRiceDataRepository, candidate, request
@@ -74,6 +75,45 @@ class ParentRecommendationApiTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "未通过系统校验"):
                 import asyncio
                 asyncio.run(parse_parent_goal(provider=provider, breeding_goal="目标", mode="conventional", target_region="云南"))
+
+    def test_goal_parser_normalizes_model_variation_before_presenting_draft(self):
+        provider = AIProviderSettings("cherryin", "https://example.test/v1", "model", "secret", True)
+        returned = {
+            "mode": "conventional", "target_region": "云南省", "summary": "草稿",
+            "conditions": [{
+                **self.condition,
+                "code": "model-generated-random-code",
+                "unit": "日",
+            }],
+            "unresolved_requirements": [], "assumptions": [],
+        }
+        with patch("app.parent_goal_parser.model_json_request", new=AsyncMock(return_value=returned)):
+            draft = asyncio.run(parse_parent_goal(
+                provider=provider,
+                breeding_goal="面向云南，全生育期必须在120～150天。",
+                mode="conventional",
+                target_region="云南",
+            ))
+        self.assertEqual(draft.target_region, "云南")
+        self.assertEqual(draft.conditions[0].unit, "天")
+        self.assertEqual(draft.conditions[0].code, "growth_duration_days-hard-every_parent-1")
+
+    def test_slow_goal_parse_emits_progress_heartbeats_before_result(self):
+        async def worker(progress):
+            await progress("input_validation", "正在检查输入")
+            await progress("model_analysis", "正在调用大模型")
+            await asyncio.sleep(0.035)
+            await progress("rule_validation", "正在校验条件")
+            return {"goal_draft_id": "draft-1"}
+
+        async def collect():
+            return [event async for event in goal_progress_events(worker, heartbeat_seconds=0.01)]
+
+        events = asyncio.run(collect())
+        self.assertEqual(events[-1]["type"], "result")
+        self.assertEqual(events[-1]["payload"]["goal_draft_id"], "draft-1")
+        self.assertGreaterEqual(sum(event["type"] == "heartbeat" for event in events), 2)
+        self.assertIn("model_analysis", [event.get("stage") for event in events])
 
     def test_v2_snapshot_exports_do_not_depend_on_legacy_score_fields(self):
         result = ParentRecommendationEngine().recommend(

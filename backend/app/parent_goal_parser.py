@@ -23,6 +23,8 @@ MODE_LABELS = {
     "hybrid_two_line": "两系杂交稻配组",
 }
 
+GOAL_PARSER_VERSION = "ynaas-parent-goal-v2.1"
+
 
 def supported_field_catalog() -> list[dict[str, str]]:
     base = [
@@ -132,5 +134,18 @@ async def parse_parent_goal(
         raise ResearchAgentError("大模型已返回目标草稿，但字段或条件未通过系统校验，请重试或改写育种目标。") from exc
     if draft.mode != mode:
         raise ResearchAgentError("大模型改变了已选育种路线，本次草稿已拒绝，请重试。")
-    return draft
+    catalog = {item["field"]: item for item in supported_field_catalog()}
+    normalized_conditions: list[GoalConditionDraft] = []
+    for index, condition in enumerate(draft.conditions, start=1):
+        stable_code = f"{condition.field}-{condition.kind}-{condition.scope}-{index}"
+        normalized_conditions.append(condition.model_copy(update={
+            "code": stable_code[:80],
+            "unit": catalog[condition.field]["unit"],
+        }))
+    return draft.model_copy(update={
+        # A region explicitly entered in the form is authoritative.  The model
+        # may extract a region only when the dedicated field was left blank.
+        "target_region": target_region.strip() or draft.target_region,
+        "conditions": normalized_conditions,
+    })
 

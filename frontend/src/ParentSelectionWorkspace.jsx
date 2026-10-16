@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, LoaderCircle, Plus, Scale, ShieldCheck, Trash2 } from "lucide-react";
-import { authorizedFetch, jsonRequest, request } from "./api";
+import { authorizedFetch, jsonRequest, request, streamJsonLines } from "./api";
 import RiceDataVarietyDrawer from "./RiceDataVarietyDrawer";
 
 const MODE_LABELS = {
@@ -30,6 +30,21 @@ const FIELD_OPTIONS = [
   ["rice_type", "籼粳类型", ""],
   ["variety_kind", "品种类型", ""],
 ];
+
+function GoalParsingProgress({ events, parsing }) {
+  if (!events.length) return null;
+  return <div className="goal-parsing-progress" role="status" aria-live="polite">
+    <strong>{parsing ? "正在理解育种目标" : "育种目标理解过程"}</strong>
+    <ol>{events.map((event, index) => {
+      const active = parsing && index === events.length - 1;
+      return <li className={active ? "active" : "complete"} key={`${event.stage}-${index}`}>
+        <span>{active ? <LoaderCircle className="spin" size={15} /> : <CheckCircle2 size={15} />}</span>
+        <div><b>{event.message}</b>{event.elapsed_seconds ? <small>当前已等待 {event.elapsed_seconds} 秒</small> : null}</div>
+      </li>;
+    })}</ol>
+    {parsing && <p>大模型只负责把自然语言转换为条件草稿；系统随后还会校验字段、单位和阈值。请勿重复提交。</p>}
+  </div>;
+}
 
 function editableValue(condition) {
   return Array.isArray(condition.value) ? condition.value.join("～") : String(condition.value ?? "");
@@ -165,6 +180,7 @@ export default function ParentSelectionWorkspace({ onNotice }) {
   const [pinned, setPinned] = useState("");
   const [excluded, setExcluded] = useState("");
   const [parsing, setParsing] = useState(false);
+  const [parseProgress, setParseProgress] = useState([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
@@ -172,7 +188,7 @@ export default function ParentSelectionWorkspace({ onNotice }) {
 
   function invalidateDraft() {
     setGoalDraftId(""); setDraftConfirmed(false); setConditions([]);
-    setDraftSummary(""); setUnresolved([]); setAssumptions([]); setResult(null);
+    setDraftSummary(""); setUnresolved([]); setAssumptions([]); setResult(null); setParseProgress([]);
   }
 
   function changeMode(value) {
@@ -181,11 +197,19 @@ export default function ParentSelectionWorkspace({ onNotice }) {
 
   async function parseGoal() {
     if (goal.trim().length < 2) { setError("请先用自然语言填写本次育种目标。"); return; }
-    setParsing(true); setError(""); setResult(null); setDraftConfirmed(false);
+    setParsing(true); setError(""); setResult(null); setDraftConfirmed(false); setParseProgress([]);
     try {
-      const payload = await request("/api/research/parent-selection/goal-drafts", jsonRequest("POST", {
+      const payload = await streamJsonLines("/api/research/parent-selection/goal-drafts/stream", jsonRequest("POST", {
         mode, breeding_goal: goal, target_region: targetRegion,
-      }));
+      }), (event) => {
+        if (!["progress", "heartbeat"].includes(event.type)) return;
+        setParseProgress((current) => {
+          if (event.type === "heartbeat" && current.at(-1)?.stage === event.stage) {
+            return [...current.slice(0, -1), event];
+          }
+          return [...current, event];
+        });
+      });
       setGoalDraftId(payload.goal_draft_id);
       setTargetRegion(payload.target_region || "");
       setConditions((payload.conditions || []).map((item) => ({ ...item })));
@@ -221,7 +245,18 @@ export default function ParentSelectionWorkspace({ onNotice }) {
   }
 
   return <div className="parent-selection-workspace">
-    <section className="workspace-card parent-step"><header><span>步骤 1</span><h3>填写育种目标并由大模型理解</h3></header><div className="parameter-grid"><label>育种路线<select value={mode} onChange={(event) => changeMode(event.target.value)}>{Object.entries(MODE_LABELS).map(([code, label]) => <option value={code} key={code}>{label}</option>)}</select></label><label>目标地区（可在目标中说明）<input value={targetRegion} onChange={(event) => { setTargetRegion(event.target.value); invalidateDraft(); }} placeholder="例如：云南" /></label></div><label>自然语言育种目标<textarea value={goal} onChange={(event) => { setGoal(event.target.value); invalidateDraft(); }} placeholder="例如：面向云南籼型常规稻，生育期必须在135～155天，叶瘟不高于5级；优先选择较对照增产不低于3%，且至少一个亲本整精米率不低于55%的组合。" /></label><p>请写清“必须达到”和“优先考虑”的性状；没有给出的数值阈值，大模型不会自行编造。</p>{error && <div className="workspace-error"><AlertTriangle size={17} />{error}</div>}<button className="primary-button" disabled={parsing || goal.trim().length < 2} onClick={parseGoal}>{parsing ? <LoaderCircle className="spin" size={16} /> : <Scale size={16} />}{parsing ? "大模型正在理解目标…" : "让大模型理解育种目标"}</button></section>
+    <section className="workspace-card parent-step">
+      <header><span>步骤 1</span><h3>填写育种目标并由大模型理解</h3></header>
+      <div className="parameter-grid">
+        <label>育种路线<select value={mode} onChange={(event) => changeMode(event.target.value)}>{Object.entries(MODE_LABELS).map(([code, label]) => <option value={code} key={code}>{label}</option>)}</select></label>
+        <label>目标地区（可在目标中说明）<input value={targetRegion} onChange={(event) => { setTargetRegion(event.target.value); invalidateDraft(); }} placeholder="例如：云南" /></label>
+      </div>
+      <label>自然语言育种目标<textarea value={goal} onChange={(event) => { setGoal(event.target.value); invalidateDraft(); }} placeholder="例如：面向云南籼型常规稻，生育期必须在135～155天，叶瘟不高于5级；优先选择较对照增产不低于3%，且至少一个亲本整精米率不低于55%的组合。" /></label>
+      <p>请写清“必须达到”和“优先考虑”的性状；没有给出的数值阈值，大模型不会自行编造。</p>
+      <GoalParsingProgress events={parseProgress} parsing={parsing} />
+      {error && <div className="workspace-error"><AlertTriangle size={17} />{error}</div>}
+      <button className="primary-button" disabled={parsing || goal.trim().length < 2} onClick={parseGoal}>{parsing ? <LoaderCircle className="spin" size={16} /> : <Scale size={16} />}{parsing ? "大模型正在理解目标…" : "让大模型理解育种目标"}</button>
+    </section>
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 2</span><h3>核对大模型生成的条件草案</h3></header>{draftSummary && <p>{draftSummary}</p>}{assumptions.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>需确认的理解：{assumptions.join("；")}</span></div>}{unresolved.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>尚不能执行的目标：{unresolved.join("；")}。请补充阈值后重新解析，或在下方手工新增条件。</span></div>}<ConditionEditor conditions={conditions} onChange={(items) => { setConditions(items); setDraftConfirmed(false); }} /><label className="inline-check parent-draft-confirm"><input type="checkbox" checked={draftConfirmed} disabled={!conditions.length} onChange={(event) => setDraftConfirmed(event.target.checked)} />我已核对育种路线、硬门槛、排序偏好、作用对象和阈值，同意按当前条件执行。</label></section>}
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 3</span><h3>设置候选范围和亲缘检查</h3></header><div className="parameter-grid"><label>自动召回候选数量<input type="number" min="2" max={mode === "conventional" ? 120 : 80} value={candidateLimit} onChange={(event) => setCandidateLimit(event.target.value)} /></label><label>检查祖先代数<select value={kinship.depth} onChange={(event) => { setKinship({ ...kinship, depth: Number(event.target.value), exclude_through_depth: Math.min(kinship.exclude_through_depth, Number(event.target.value)) }); setDraftConfirmed(false); }}><option value={3}>三代</option><option value={5}>五代</option></select></label><label>共同祖先排除范围<select value={kinship.exclude_through_depth} onChange={(event) => { setKinship({ ...kinship, exclude_through_depth: Number(event.target.value) }); setDraftConfirmed(false); }}><option value={2}>两代内</option><option value={3}>三代内</option>{kinship.depth === 5 && <option value={5}>五代内</option>}</select></label><label className="inline-check"><input type="checkbox" checked={kinship.require_complete_pedigree} onChange={(event) => { setKinship({ ...kinship, require_complete_pedigree: event.target.checked }); setDraftConfirmed(false); }} />系谱不完整时必须进入待核实</label></div><label>必评 RiceData 品种编号（可不填）<input value={pinned} onChange={(event) => setPinned(event.target.value)} placeholder="逗号分隔；必评仍不能绕过硬门槛" /></label><label>排除 RiceData 品种编号（可不填）<input value={excluded} onChange={(event) => setExcluded(event.target.value)} placeholder="逗号分隔" /></label></section>}
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 4</span><h3>执行确定性分析</h3></header><div className="workspace-warning"><ShieldCheck size={18} /><span>大模型只负责理解目标；品种筛选、三代/五代近亲判定和组合评分均由可复核规则完成。候选仅来自国家水稻数据中心。</span></div>{error && <div className="workspace-error"><AlertTriangle size={17} />{error}</div>}<button className="primary-button" disabled={running || !conditions.length || !draftConfirmed} onClick={run}>{running ? <LoaderCircle className="spin" size={16} /> : <Scale size={16} />}{running ? "正在检索与计算…" : "生成亲本推荐"}</button></section>}
