@@ -1,0 +1,7 @@
+# Layer only the directory-count fix over the currently deployed API release.
+# Stage the two Python files beside this Dockerfile before building.
+ARG BASE_API_IMAGE
+FROM ${BASE_API_IMAGE}
+COPY pedigree_graph.py /app/app/pedigree_graph.py
+COPY test_pedigree_graph.py /app/tests/test_pedigree_graph.py
+COPY smoke_pedigree_directory_counts.py /app/tests/smoke_pedigree_directory_counts.py

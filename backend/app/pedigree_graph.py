@@ -83,6 +83,32 @@ def list_varieties(session, keyword="", group="", only_pedigree=False, page=1, p
         {join} WHERE {where}
         ORDER BY CASE WHEN lower(v.variety_name)=lower(:exact) THEN 0 ELSE 1 END,v.variety_name,v.variety_id
         LIMIT :limit OFFSET :offset""", params)
+    # The SQL fallback is one direct fragment, not the ancestor graph displayed
+    # by pedigree_graph(). Count the same assembled graph for this page only;
+    # never traverse the whole catalogue or request anything from the source site.
+    direct_graphs = {}
+    for record in records:
+        if record['pedigree_status'] not in ('direct_collected','source_limited'):
+            continue
+        record['direct_fragment_node_count'] = record['node_count']
+        record['direct_fragment_edge_count'] = record['edge_count']
+        source_id = record['source_id']
+        if source_id not in direct_graphs:
+            try:
+                direct_graphs[source_id] = load_graph(session, source_id)
+            except ValueError:
+                logger.warning('RiceData pedigree directory count exceeds graph bound: %s', record['id'])
+                direct_graphs[source_id] = None
+        graph = direct_graphs[source_id]
+        if graph and graph['nodes']:
+            record.update(node_count=len(graph['nodes']),edge_count=len(graph['edges']),
+                          max_depth=max(n['recorded_depth'] for n in graph['nodes']),
+                          fully_expanded=graph['fully_expanded'],count_status='available')
+        else:
+            # No misleading fragment total, zero, or entire-page failure when a
+            # single graph cannot be counted within the existing safety bounds.
+            record.update(node_count=None,edge_count=None,max_depth=None,fully_expanded=False,
+                          pedigree_status='pending_verification',count_status='needs_review')
     return {"records": records, "total": total, "page": page, "page_size": page_size,
             "has_more": page*page_size<total, "keyword": keyword, "group": group}
 

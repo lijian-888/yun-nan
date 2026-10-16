@@ -51,3 +51,15 @@ direct_queue_finished 仅表示直接采集队列结束；来源缺失、needs_r
 荃广优8238独立核验已于2026-10-16T01:38:32Z完成，1214个名称路径出现项与本地图完全一致，missing_paths/extra_paths为空。此次全库任务不重复采它。
 
 云粳39号已于2026-10-16T02:24:31Z独立完整核验：120图谱节点、156关系，756个名称路径出现项与原站完全一致，无missing_paths或extra_paths；追加快照43421，旧快照保留。source SHA-256为649e50ea055372168222b9cd0cc5eb3b20d0ee96d4cb04d22800e2ea134223c8a。API角色实际读取也为120/156、fully_expanded=true、无警告和未知名称。来源、完整节点、原始HTML、核验结果存于ancestor-completion/full-source/612639，不能把756个分支出现项说成756个独立材料。
+
+## 目录节点计数与祖先图保持一致
+
+2026-10-16复现138B（15073/628940）：目录把单个直接亲本片段的5节点/4关系当成全部已存节点，而实际API祖先图是165节点/188关系；该品种没有优先完整快照，非浏览器缓存问题。
+
+`list_varieties`现在只对当前页需要直接关系组装的品种调用与图谱相同的`load_graph`，使用组装后节点数及有效关系数。同一来源在一页内复用组装结果，完整来源快照仍优先。不访问原站，不全库遍历，不把本地闭合标为原站独立核验通过。原片段数量单列为`direct_fragment_node_count`/`direct_fragment_edge_count`；超过安全上限或不能组装时计数为null并标`count_status=needs_review`，不回退到误导的小数字，也不拖垮整页。
+
+前端改为“N个来源节点”，与右侧分母一致；选中品种后使用新读取图谱的实际总数，避免后台采集导致目录旧数字滞留。引用卡片不重复计入来源节点；零有效关系不能被表述成“原站没有亲本”。
+
+热修复以实际在运行的API镜像`ynaas-trial-api:parent-75281c6`为基础，仅覆盖`pedigree_graph.py`及测试；Web以`ynaas-trial-release-9d479aa/frontend`为基础，仅更新工作区文案和摘要函数，保留该版本的亲本推荐等功能。构建模板为`Dockerfile.pedigree-counts`，镜像`ynaas-trial-api:pedigree-counts-20261016`和`ynaas-trial-web:pedigree-counts-20261016`，服务器审计目录`audit/pedigree-counts`。部署在现有域名/source-limited/ancestor-api/parent-release配置之后追加`ancestor-completion.yml`及`pedigree-counts-api.yml`，仅`up -d --no-deps --no-build api web`，不重启采集worker。重载Web与Gateway nginx的上游解析。
+
+后续发布应包含本次源码改动；不要在较新业务版本后无条件追加这份基于旧业务版本的热修复镜像。只读实库回归：在API容器中运行`PYTHONPATH=/app python /app/tests/smoke_pedigree_directory_counts.py`，核对138B、00122－40－315、云粳39号、荃广优8238以及一整页目录与实际图谱计数。候选模块可通过`PEDIGREE_GRAPH_CANDIDATE`指定路径，不需改运行中应用或访问原站。

@@ -1,0 +1,6 @@
+# Append AFTER the active release overlays; update only api/web, not workers.
+services:
+  api:
+    image: ynaas-trial-api:pedigree-counts-20261016
+  web:
+    image: ynaas-trial-web:pedigree-counts-20261016

@@ -1,12 +1,69 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
-from app.pedigree_graph import create_pedigree_router, serialize_graph, public_url
+from app.pedigree_graph import create_pedigree_router, serialize_graph, public_url, list_varieties
+from app.pedigree_direct import assemble, fragment
 
 
 class PedigreeTests(unittest.TestCase):
+    def direct_ancestry(self):
+        def node(name, sid, parent=None):
+            return dict(name=name,source_id=sid,parent=parent,pending_expansion=False,url=None)
+        root=fragment([node('138B','1'),node('母本组合',None,0),node('A','2',1),
+                       node('B','3',1),node('另一亲本',None,0)])
+        a=fragment([node('A','2'),node('祖先A',None,0)])
+        b=fragment([node('B','3'),node('祖先B',None,0)])
+        facts={f['root']:dict(fragment=f,status='verified_direct') for f in (root,a,b)}
+        return assemble(root['root'],facts)
+
+    def directory_row(self, **extra):
+        return dict(id=1,name='138B',source_id='1',node_count=5,edge_count=4,
+                    max_depth=None,fully_expanded=None,pedigree_status='direct_collected',**extra)
+
+    def test_directory_counts_assembled_ancestors_not_just_five_node_fragment(self):
+        graph=self.direct_ancestry()
+        session=MagicMock();session.scalar.return_value=1
+        with patch('app.pedigree_graph.rows',return_value=[self.directory_row()]), \
+             patch('app.pedigree_graph.load_graph',return_value=graph):
+            record=list_varieties(session,keyword='138B')['records'][0]
+        self.assertEqual(record['node_count'],len(graph['nodes']))
+        self.assertEqual(record['edge_count'],len(graph['edges']))
+        self.assertEqual(record['fully_expanded'],graph['fully_expanded'])
+        self.assertEqual(record['direct_fragment_node_count'],5)
+
+    def test_directory_keeps_snapshot_counts_and_does_not_load_direct_fallback(self):
+        record=self.directory_row();record.update(node_count=165,edge_count=188,pedigree_status='verified')
+        session=MagicMock();session.scalar.return_value=1
+        with patch('app.pedigree_graph.rows',return_value=[record]), \
+             patch('app.pedigree_graph.load_graph') as load:
+            result=list_varieties(session)['records'][0]
+        self.assertEqual((result['node_count'],result['edge_count']),(165,188))
+        load.assert_not_called()
+
+    def test_directory_counts_do_not_silently_fall_back_on_oversized_graph(self):
+        session=MagicMock();session.scalar.return_value=1
+        with patch('app.pedigree_graph.rows',return_value=[self.directory_row()]), \
+             patch('app.pedigree_graph.load_graph',side_effect=ValueError('safe graph bound')):
+            result=list_varieties(session)['records'][0]
+        self.assertIsNone(result['node_count'])
+        self.assertIsNone(result['edge_count'])
+        self.assertEqual(result['pedigree_status'],'pending_verification')
+        self.assertEqual(result['count_status'],'needs_review')
+
+    def test_source_limited_directory_uses_valid_edges_not_raw_fragment_edges(self):
+        graph=self.direct_ancestry();graph.update(fully_expanded=False,edges=[],source_limited_count=1)
+        record=self.directory_row();record['pedigree_status']='source_limited'
+        session=MagicMock();session.scalar.return_value=1
+        with patch('app.pedigree_graph.rows',return_value=[record]), \
+             patch('app.pedigree_graph.load_graph',return_value=graph):
+            result=list_varieties(session)['records'][0]
+        self.assertEqual(result['node_count'],len(graph['nodes']))
+        self.assertEqual(result['edge_count'],0)
+        self.assertFalse(result['fully_expanded'])
+        self.assertEqual(result['pedigree_status'],'source_limited')
+
     def client(self, denied=False):
         def user():
             if denied: raise HTTPException(403,"无权限")
