@@ -1,0 +1,8 @@
+ARG BASE_IMAGE=ynaas-trial-api:parent-75281c6
+FROM ${BASE_IMAGE}
+
+# Preserve the source-limited and ancestor-completion production overlays in
+# the base image while replacing only the parent recommendation modules that
+# changed in this release.
+COPY backend/app/parent_recommendation_engine.py /app/app/parent_recommendation_engine.py
+COPY backend/app/ricedata_parent_repository.py /app/app/ricedata_parent_repository.py
