@@ -155,6 +155,10 @@ from .business_data_query import DataQuery, BusinessQueryError, load_business_ca
 from .variety_search import create_variety_search_router
 from .pedigree_graph import create_pedigree_router
 from .teacher_source_files import create_teacher_source_files_router
+from .parent_recommendation_api import (
+    create_parent_recommendation_router,
+    ensure_parent_recommendation_schema,
+)
 from .teacher_file_query import build_teacher_file_evidence, validate_teacher_answer
 from .teacher_workbook_index import index_summary as teacher_index_summary
 from .research_report import build_analysis_chart_png, build_research_report_pdf, is_report_request
@@ -190,9 +194,7 @@ from .breeding_intelligence import (
     get_recommendation_rule,
     list_materials as list_intelligence_materials,
     recommendation_csv,
-    run_parent_recommendation,
     save_material_analysis,
-    save_parent_recommendation,
     update_recommendation_rule,
 )
 from .institution_data import (
@@ -2976,6 +2978,15 @@ app = FastAPI(title="隆耘 Agent 育种智能体", version="1.5.0")
 app.include_router(create_variety_search_router(require_business_user, get_business_query_session))
 app.include_router(create_pedigree_router(require_business_user, get_business_query_session))
 app.include_router(create_teacher_source_files_router(require_business_user))
+app.include_router(create_parent_recommendation_router(
+    require_researcher=require_researcher,
+    require_field_admin=require_field_admin,
+    get_session=get_research_session,
+    institution_id=INSTITUTION_ID,
+    project_id=DEFAULT_PROJECT_ID,
+    ai_gate=AI_TASK_GATE,
+    ai_queue_wait_seconds=AI_TASK_QUEUE_WAIT_SECONDS,
+))
 ACPS_SETTINGS = AcpsSettings.from_env()
 ACPS_DIRECT_LEADER = AcpsDirectLeaderRuntime(ACPS_SETTINGS)
 ACPS_GROUP_LEADER = AcpsGroupLeaderRuntime(ACPS_SETTINGS)
@@ -3228,6 +3239,7 @@ def initialize_database(
         ensure_trial_package_schema(session)
         ensure_breeding_dossier_schema(session)
         ensure_breeding_intelligence_schema(session)
+        ensure_parent_recommendation_schema(session)
         ensure_genomics_schema(session)
         ensure_genotype_asset_schema(session)
         ensure_single_institution_schema(session)
@@ -3581,55 +3593,10 @@ def create_parent_recommendations(
     user: CurrentUser = Depends(require_researcher),
     session: Session = Depends(get_research_session),
 ) -> dict[str, Any]:
-    candidate_keys = list(dict.fromkeys(item.strip() for item in payload.candidate_keys if item.strip()))
-    if len(candidate_keys) < 2:
-        raise HTTPException(422, "至少选择 2 个不同的候选亲本。")
-    account, config = institution_data_config_for_user(session, user)
-    rule = get_recommendation_rule(session, active_project_id(session))
-    weights = dict(rule["weights"])
-    if payload.weights is not None:
-        unknown = sorted(set(payload.weights) - set(DEFAULT_RECOMMENDATION_WEIGHTS))
-        if unknown:
-            raise HTTPException(422, f"未知权重维度：{'、'.join(unknown)}。")
-        weights.update({key: float(value) for key, value in payload.weights.items()})
-    filter_settings = (
-        payload.filter_settings.model_dump()
-        if payload.filter_settings is not None
-        else dict(rule.get("filter_settings") or DEFAULT_RECOMMENDATION_FILTERS)
+    raise HTTPException(
+        410,
+        "旧版接口依赖人工选择院内材料，已停止新建推荐。请使用 /api/research/parent-selection/runs。",
     )
-    sort_mode = payload.sort_mode or str(rule.get("sort_mode") or "score")
-    try:
-        result = run_parent_recommendation(
-            INSTITUTION_DATABASES.engine(config.business_database),
-            account.institution_id,
-            active_project_id(session),
-            candidate_keys,
-            weights,
-            payload.breeding_goal,
-            payload.constraints,
-            filter_settings,
-            sort_mode,
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    request_json = payload.model_dump()
-    request_json["candidate_keys"] = candidate_keys
-    run_id = save_parent_recommendation(
-        session,
-        owner_id=user.id,
-        institution_id=account.institution_id,
-        project_id=active_project_id(session),
-        request_payload=request_json,
-        result=result,
-        rule_version=int(rule["version"]),
-    )
-    record_permission_audit(
-        session, user, "parent_auxiliary_recommendation_created", "parent_recommendation_run", run_id,
-        project_id=active_project_id(session),
-        after={"candidate_count": len(candidate_keys), "combination_count": len(result["recommendations"])},
-    )
-    session.commit()
-    return {"run_id": run_id, "rule_version": rule["version"], **result}
 
 
 def _parent_recommendation_for_current_user(session: Session, run_id: str, user: CurrentUser) -> dict[str, Any]:

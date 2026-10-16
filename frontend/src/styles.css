@@ -491,6 +491,23 @@ body:has(.research-shell), body:has(.assistant-loading), body:has(.auth-error) {
 .confidence-高 { color: #176748; background: #e2f3eb; }.confidence-中 { color: #82591f; background: #fff1d8; }.confidence-低 { color: #9a4035; background: #fdeae7; }
 .recommendation-item dl, .run-metadata { display: grid; grid-template-columns: 76px 1fr; gap: 6px 10px; margin: 0; font-size: 12px; line-height: 1.6; }
 .recommendation-item dt, .run-metadata dt { color: #71877f; }.recommendation-item dd, .run-metadata dd { margin: 0; color: #405e54; }
+.parent-selection-workspace { display: grid; gap: 2px; }
+.parent-step > header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.parent-step > header > span { flex: 0 0 auto; border-radius: 999px; padding: 4px 9px; color: #236b58; background: #e6f3ed; font-size: 11px; font-weight: 700; }
+.parent-step > header h3 { margin: 0; }
+.parent-step label, .parent-condition-row label { display: grid; gap: 5px; color: #526f64; font-size: 12px; }
+.parent-step input, .parent-step textarea, .parent-step select, .parent-condition-row input, .parent-condition-row select { min-width: 0; border: 1px solid #cbdcd4; border-radius: 5px; padding: 9px 10px; color: #294f42; background: #fff; }
+.parent-step textarea { min-height: 80px; resize: vertical; }
+.parent-condition-editor { display: grid; gap: 10px; }
+.parent-condition-editor > button, .parent-review-actions button { display: inline-flex; width: fit-content; align-items: center; gap: 5px; border: 1px solid #bdd6cb; border-radius: 5px; padding: 7px 10px; color: #276b58; background: #f4faf7; cursor: pointer; }
+.parent-condition-row { border: 1px solid #dbe7e1; border-radius: 7px; padding: 12px; background: #f9fcfa; }
+.parent-condition-heading { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 10px; }
+.parent-condition-heading .icon-button { display: grid; place-items: center; border: 1px solid #ead4cc; border-radius: 5px; padding: 7px; color: #9b4d3d; background: #fff8f5; cursor: pointer; }
+.parent-draft-confirm { margin-top: 14px; padding: 11px 12px; border: 1px solid #b9d8ca; border-radius: 6px; background: #eff8f4; }
+.parent-pair-card .recommendation-rank { width: auto; min-width: 42px; height: 34px; border-radius: 999px; padding: 0 7px; font-size: 10px; }
+.parent-pair-card .tier-a { background: #1f795d; }.parent-pair-card .tier-b { background: #5e8451; }.parent-pair-card .tier-c { background: #9b7a3d; }.parent-pair-card .tier-pending { background: #b06c2d; }.parent-pair-card .tier-excluded { background: #9b4a42; }
+.parent-review-actions { display: flex; align-items: center; gap: 7px; margin-top: 12px; color: #5d766c; font-size: 12px; }
+.parent-review-actions button:disabled { cursor: wait; opacity: .55; }
 .trial-analysis-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .parameter-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
 .trial-analysis-form .primary-button { justify-self: start; }
