@@ -153,6 +153,8 @@ class RiceDataParentRepository:
         clauses = ["TRUE"]
         params: dict[str, Any] = {"limit": request.candidate_limit, "pinned": list(request.pinned_variety_ids) or [-1]}
         score_terms: list[str] = []
+        ctes: list[str] = []
+        joins: list[str] = []
         # Only identity conditions are pushed down. Trait gates remain visible
         # to the engine so failures and unknown states are explainable.
         for index, condition in enumerate(request.conditions):
@@ -176,9 +178,21 @@ class RiceDataParentRepository:
                     params[key] = {"inbred": "%常规%", "hybrid": "%杂交%", "sterile": "%不育系%"}.get(str(value), str(value))
                     patterns.append(f"v.variety_type LIKE :{key}")
                 clauses.append("(" + " OR ".join(patterns) + ")")
+        region_projection = "FALSE AS region_match"
         if request.target_region:
             params["target_region"] = request.target_region + "%"
-            score_terms.append("CASE WHEN EXISTS (SELECT 1 FROM agent_query.ricedata__rice_variety_approval ar WHERE ar.variety_id=v.variety_id AND ar.approval_region LIKE :target_region) THEN 3 ELSE 0 END")
+            region_projection = "BOOL_OR(approval_region LIKE :target_region) AS region_match"
+            score_terms.append("CASE WHEN COALESCE(a.region_match,FALSE) THEN 3 ELSE 0 END")
+        ctes.append(f"""approval_stats AS (
+            SELECT variety_id,max(approval_year) AS latest_year,count(*) AS approval_count,
+                   {region_projection}
+            FROM agent_query.ricedata__rice_variety_approval GROUP BY variety_id
+        )""")
+        joins.append("LEFT JOIN approval_stats a ON a.variety_id=v.variety_id")
+
+        trait_codes: list[str] = []
+        trait_score_columns: list[str] = []
+        yield_score_columns: list[str] = []
         for index, condition in enumerate(request.conditions):
             if condition.scope is ConditionScope.PAIR or condition.operator not in {*_SQL_OPERATOR, "between"}:
                 continue
@@ -201,37 +215,57 @@ class RiceDataParentRepository:
             if condition.field in {"yield_relative_change_pct", "yield_kg_per_mu"}:
                 column = "relative_change_pct" if condition.field == "yield_relative_change_pct" else "yield_kg_per_mu"
                 yield_comparison = comparison.replace("candidate_value", f"y.{column}")
-                score_terms.append(f"""CASE WHEN EXISTS (
-                    SELECT 1 FROM agent_query.ricedata__rice_variety_yield_observation y
-                    WHERE y.variety_id=v.variety_id AND y.review_status='accepted'
-                      AND {yield_comparison}
-                ) THEN {weight} ELSE 0 END""")
+                alias = f"yield_score_{index}"
+                yield_score_columns.append(
+                    f"MAX(CASE WHEN {yield_comparison} THEN {weight} ELSE 0 END) AS {alias}"
+                )
+                score_terms.append(f"COALESCE(ys.{alias},0)")
             else:
                 params[f"recall_trait_{index}"] = condition.field
-                score_terms.append(f"""CASE WHEN EXISTS (
-                    SELECT 1 FROM (
-                      SELECT ta.variety_id,COALESCE(m.value_numeric,m.value_min,m.value_max) AS candidate_value
-                      FROM agent_query.ricedata__rice_variety_trait_measurement m
-                      JOIN agent_query.ricedata__rice_variety_trait_summary s ON s.trait_summary_id=m.trait_summary_id
-                      JOIN agent_query.ricedata__rice_variety_approval ta ON ta.approval_id=s.approval_id
-                      WHERE m.trait_code=:recall_trait_{index}
-                      UNION ALL
-                      SELECT n.variety_id,COALESCE(n.value_numeric,n.value_min,n.value_max) AS candidate_value
-                      FROM agent_query.ricedata__rice_variety_narrative_fact n
-                      WHERE n.trait_code=:recall_trait_{index} AND n.review_status='verified'
-                    ) fact WHERE fact.variety_id=v.variety_id AND {comparison}
-                ) THEN {weight} ELSE 0 END""")
+                trait_codes.append(condition.field)
+                alias = f"trait_score_{index}"
+                trait_score_columns.append(
+                    f"MAX(CASE WHEN trait_code=:recall_trait_{index} AND {comparison} "
+                    f"THEN {weight} ELSE 0 END) AS {alias}"
+                )
+                score_terms.append(f"COALESCE(ts.{alias},0)")
+
+        if trait_score_columns:
+            params["recall_trait_codes"] = list(dict.fromkeys(trait_codes))
+            ctes.extend(("""trait_fact AS (
+                SELECT ta.variety_id,m.trait_code,
+                       COALESCE(m.value_numeric,m.value_min,m.value_max) AS candidate_value
+                FROM agent_query.ricedata__rice_variety_trait_measurement m
+                JOIN agent_query.ricedata__rice_variety_trait_summary s
+                  ON s.trait_summary_id=m.trait_summary_id
+                JOIN agent_query.ricedata__rice_variety_approval ta ON ta.approval_id=s.approval_id
+                WHERE m.trait_code=ANY(:recall_trait_codes)
+                UNION ALL
+                SELECT n.variety_id,n.trait_code,
+                       COALESCE(n.value_numeric,n.value_min,n.value_max) AS candidate_value
+                FROM agent_query.ricedata__rice_variety_narrative_fact n
+                WHERE n.trait_code=ANY(:recall_trait_codes) AND n.review_status='verified'
+            )""", f"""trait_scores AS (
+                SELECT variety_id,{','.join(trait_score_columns)}
+                FROM trait_fact WHERE candidate_value IS NOT NULL GROUP BY variety_id
+            )"""))
+            joins.append("LEFT JOIN trait_scores ts ON ts.variety_id=v.variety_id")
+        if yield_score_columns:
+            ctes.append(f"""yield_scores AS (
+                SELECT y.variety_id,{','.join(yield_score_columns)}
+                FROM agent_query.ricedata__rice_variety_yield_observation y
+                WHERE y.review_status='accepted' GROUP BY y.variety_id
+            )""")
+            joins.append("LEFT JOIN yield_scores ys ON ys.variety_id=v.variety_id")
         where = " AND ".join(clauses)
         recall_score = " + ".join(score_terms) if score_terms else "0"
         return _rows(self.session, f"""
+            WITH {','.join(ctes)}
             SELECT v.variety_id,v.variety_name,v.variety_type,v.parentage_text,v.source_url,
                    COALESCE(a.latest_year,0) AS latest_year,COALESCE(a.approval_count,0) AS approval_count,
                    ({recall_score}) AS recall_score
             FROM agent_query.ricedata__rice_variety v
-            LEFT JOIN LATERAL (
-              SELECT max(approval_year) AS latest_year,count(*) AS approval_count
-              FROM agent_query.ricedata__rice_variety_approval a WHERE a.variety_id=v.variety_id
-            ) a ON TRUE
+            {' '.join(joins)}
             WHERE (({where}) OR v.variety_id=ANY(:pinned))
             ORDER BY (v.variety_id=ANY(:pinned)) DESC,recall_score DESC,a.approval_count DESC,a.latest_year DESC NULLS LAST,
                      v.variety_name,v.variety_id
