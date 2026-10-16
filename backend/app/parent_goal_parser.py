@@ -119,7 +119,7 @@ GOAL_PARSER_CONTRACT = """
 async def parse_parent_goal(
     *, provider: AIProviderSettings, breeding_goal: str, mode: str, target_region: str,
 ) -> GoalDraftModel:
-    raw = await model_json_request(provider=provider, contract=GOAL_PARSER_CONTRACT, data={
+    raw = await model_json_request(provider=provider, contract=GOAL_PARSER_CONTRACT, timeout_seconds=120, data={
         "breeding_goal": breeding_goal,
         "mode": mode,
         "mode_label": MODE_LABELS[mode],

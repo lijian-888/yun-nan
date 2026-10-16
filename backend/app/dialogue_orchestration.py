@@ -175,7 +175,9 @@ async def plan_dialogue(*, provider: AIProviderSettings, question: str,
         raise ResearchAgentError("本轮问题理解未完成，未执行数据库查询或保存回答，请重试。") from exc
 
 
-async def model_json_request(*, provider: AIProviderSettings, contract: str, data: dict) -> dict:
+async def model_json_request(
+    *, provider: AIProviderSettings, contract: str, data: dict, timeout_seconds: float = 45,
+) -> dict:
     """Shared model planning call. Caller must authenticate, check egress and queue."""
     request = {
         "model": provider.model, "stream": False, "temperature": 0,
@@ -185,7 +187,7 @@ async def model_json_request(*, provider: AIProviderSettings, contract: str, dat
         "response_format": {"type": "json_object"},
     }
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(45, connect=10)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds, connect=10)) as client:
             response = await client.post(
                 f"{provider.base_url}/chat/completions", json=request,
                 headers={"Authorization": f"Bearer {provider.api_key}"} if provider.api_key else {},
