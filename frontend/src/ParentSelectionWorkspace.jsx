@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, LoaderCircle, Plus, Scale, ShieldCheck, Trash2 } from "lucide-react";
 import { authorizedFetch, jsonRequest, request } from "./api";
+import RiceDataVarietyDrawer from "./RiceDataVarietyDrawer";
 
 const MODE_LABELS = {
   conventional: "常规稻杂交",
@@ -91,8 +92,30 @@ function ConditionEditor({ conditions, onChange }) {
   </div>;
 }
 
+const EVIDENCE_STATE_LABELS = { pass: "满足", fail: "不满足", unknown: "证据不足" };
+const CONDITION_KIND_LABELS = { hard: "硬门槛", preference: "排序偏好" };
+
+function scoreText(value) {
+  return value == null ? "—" : Number(value).toFixed(1);
+}
+
+function FiveTraitComparison({ evaluation, onOpenParent }) {
+  if (!evaluation) return null;
+  return <section className="pair-five-trait">
+    <div className="pair-section-heading"><div><strong>双亲五性综合评价对照</strong><span>已覆盖 {evaluation.covered_dimension_count}/5 个维度</span></div><small>{evaluation.boundary}</small></div>
+    <div className="pair-five-trait-table-wrap"><table><thead><tr><th>评价维度</th><th>{evaluation.female.name}</th><th>{evaluation.male.name}</th><th>组合证据说明</th></tr></thead><tbody>
+      {evaluation.dimensions.map((dimension) => <tr key={dimension.code}><th>{dimension.label}</th><td>{scoreText(dimension.female_score)}</td><td>{scoreText(dimension.male_score)}</td><td>{dimension.evidence_text}</td></tr>)}
+      <tr className="pair-comprehensive-row"><th>五性综合分</th><td>{scoreText(evaluation.female.comprehensive_score)}</td><td>{scoreText(evaluation.male.comprehensive_score)}</td><td>只有五项齐全时才形成单亲综合分；不计算组合或后代综合分。</td></tr>
+    </tbody></table></div>
+    <div className="parent-evaluation-summaries">
+      {[evaluation.female, evaluation.male].map((parent) => <article key={parent.variety_id}><strong>{parent.name}</strong><span>已有 {parent.scored_dimension_count}/5 项</span><p>{parent.missing_dimensions?.length ? `缺失：${parent.missing_dimensions.join("、")}` : "五项数据齐全"}</p><button type="button" onClick={() => onOpenParent(parent)}>查看完整品种信息</button></article>)}
+    </div>
+  </section>;
+}
+
 function PairCard({ item, runId, onReviewed, onNotice }) {
   const [reviewing, setReviewing] = useState(false);
+  const [selectedParent, setSelectedParent] = useState(null);
   async function review(decision) {
     setReviewing(true);
     try {
@@ -107,7 +130,7 @@ function PairCard({ item, runId, onReviewed, onNotice }) {
       onNotice?.(error.message);
     } finally { setReviewing(false); }
   }
-  return <article className="recommendation-item parent-pair-card">
+  return <><article className="recommendation-item parent-pair-card">
     <div className={`recommendation-rank tier-${String(item.tier).toLowerCase()}`}>{item.tier === "pending" ? "待核实" : item.tier === "excluded" ? "排除" : `${item.tier}级`}</div>
     <div>
       <h4>{item.female_parent.name} × {item.male_parent.name}</h4>
@@ -119,10 +142,12 @@ function PairCard({ item, runId, onReviewed, onNotice }) {
         <dt>数据缺口</dt><dd>{item.data_gaps?.join("；") || "无关键缺口"}</dd>
         {item.exclusion_reasons?.length > 0 && <><dt>排除原因</dt><dd>{item.exclusion_reasons.join("；")}</dd></>}
       </dl>
-      <details><summary>查看硬门槛、偏好和证据来源</summary><pre>{JSON.stringify({ conditions: item.condition_outcomes, common_ancestors: item.kinship?.common_ancestors }, null, 2)}</pre></details>
+      {item.tier !== "excluded" && <section className="pair-qualification"><strong>为什么这个组合符合条件</strong>{item.qualification_reasons?.length ? <ul>{item.qualification_reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul> : <p>当前没有可单独列出的硬门槛通过理由，请查看条件证据。</p>}{item.recommendation_reasons?.length > 0 && <><b>目标性状贡献</b><ul>{item.recommendation_reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></>}</section>}
+      <FiveTraitComparison evaluation={item.five_trait_evaluation} onOpenParent={setSelectedParent} />
+      <details className="pair-condition-details"><summary>逐项查看硬门槛、偏好和证据来源</summary><div>{item.condition_outcomes?.map((condition) => <article key={condition.condition_code}><header><strong>{condition.label}</strong><span className={`condition-state state-${condition.state}`}>{CONDITION_KIND_LABELS[condition.kind] || "条件"} · {EVIDENCE_STATE_LABELS[condition.state] || condition.state}</span></header><p>{condition.reasons?.join("；")}</p>{condition.evidence?.length > 0 && <ul>{condition.evidence.map((evidence, index) => <li key={`${evidence.source_id}-${index}`}><b>{evidence.value}{evidence.unit || ""}</b>{evidence.region ? ` · ${evidence.region}` : ""}{evidence.year ? ` · ${evidence.year}年` : ""}{evidence.source_url && <a href={evidence.source_url} target="_blank" rel="noreferrer">查看来源</a>}</li>)}</ul>}</article>)}</div>{item.kinship?.common_ancestors?.length > 0 && <div className="pair-common-ancestors"><strong>共同祖先</strong><ul>{item.kinship.common_ancestors.map((ancestor) => <li key={ancestor.identity}>{ancestor.name}（母本侧第 {ancestor.female_depth} 代，父本侧第 {ancestor.male_depth} 代）</li>)}</ul></div>}</details>
       {item.tier !== "excluded" && <div className="parent-review-actions"><span>育种专家审核：</span><button disabled={reviewing} onClick={() => review("accepted")}>接受</button><button disabled={reviewing} onClick={() => review("held")}>暂缓</button><button disabled={reviewing} onClick={() => review("rejected")}>否决</button></div>}
     </div>
-  </article>;
+  </article>{selectedParent && <RiceDataVarietyDrawer parent={selectedParent} onClose={() => setSelectedParent(null)} />}</>;
 }
 
 export default function ParentSelectionWorkspace({ onNotice }) {

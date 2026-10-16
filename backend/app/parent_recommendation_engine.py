@@ -92,6 +92,25 @@ class PedigreeProfile:
 
 
 @dataclass(frozen=True)
+class FiveTraitProfile:
+    """Existing five-trait evaluation for one parent, never an offspring prediction."""
+
+    yield_score: float | None = None
+    stability_score: float | None = None
+    disease_score: float | None = None
+    stress_score: float | None = None
+    quality_score: float | None = None
+    comprehensive_score: float | None = None
+    comprehensive_rank: int | None = None
+    scored_dimension_count: int = 0
+    missing_dimensions: tuple[str, ...] = ()
+    evaluation_status: str = "not_evaluated"
+    evaluation_profile_id: str = ""
+    evidence_summary: dict[str, Any] = field(default_factory=dict)
+    interpretation_boundary: str = ""
+
+
+@dataclass(frozen=True)
 class CandidateProfile:
     variety_id: int
     name: str
@@ -100,6 +119,7 @@ class CandidateProfile:
     attributes: dict[str, str] = field(default_factory=dict)
     evidence: dict[str, tuple[EvidencePoint, ...]] = field(default_factory=dict)
     pedigree: PedigreeProfile = field(default_factory=PedigreeProfile)
+    five_trait: FiveTraitProfile = field(default_factory=FiveTraitProfile)
     source_url: str = ""
 
 
@@ -353,13 +373,78 @@ def _role_compatible(mode: RecommendationMode, female: CandidateProfile, male: C
     return EvidenceState.PASS if required_female in female.roles and ParentRole.RESTORER in male.roles else EvidenceState.FAIL
 
 
-def _serialize_outcome(value: ConditionOutcome) -> dict[str, Any]:
+def _serialize_outcome(value: ConditionOutcome, condition: ConditionSpec | None = None) -> dict[str, Any]:
     return {
         "condition_code": value.condition_code,
         "label": value.label,
+        "kind": condition.kind.value if condition else "",
+        "scope": condition.scope.value if condition else "",
         "state": value.state.value,
         "reasons": list(value.reasons),
         "evidence": [point.__dict__ for point in value.evidence],
+    }
+
+
+_FIVE_TRAIT_DIMENSIONS = (
+    ("yield", "丰产", "yield_score"),
+    ("stability", "稳产", "stability_score"),
+    ("disease", "抗病", "disease_score"),
+    ("stress", "耐逆", "stress_score"),
+    ("quality", "品质", "quality_score"),
+)
+
+
+def _serialize_five_trait(value: FiveTraitProfile) -> dict[str, Any]:
+    dimensions = [
+        {"code": code, "label": label, "score": getattr(value, field_name)}
+        for code, label, field_name in _FIVE_TRAIT_DIMENSIONS
+    ]
+    return {
+        "dimensions": dimensions,
+        "comprehensive_score": value.comprehensive_score,
+        "comprehensive_rank": value.comprehensive_rank,
+        "scored_dimension_count": value.scored_dimension_count,
+        "missing_dimensions": list(value.missing_dimensions),
+        "evaluation_status": value.evaluation_status,
+        "evaluation_profile_id": value.evaluation_profile_id,
+        "evidence_summary": value.evidence_summary,
+        "interpretation_boundary": value.interpretation_boundary,
+    }
+
+
+def _pair_five_trait(female: CandidateProfile, male: CandidateProfile) -> dict[str, Any]:
+    dimensions = []
+    for code, label, field_name in _FIVE_TRAIT_DIMENSIONS:
+        female_score = getattr(female.five_trait, field_name)
+        male_score = getattr(male.five_trait, field_name)
+        if female_score is not None and male_score is not None:
+            coverage = "both"
+            evidence_text = f"双方均有{label}评价证据。"
+        elif female_score is not None:
+            coverage = "female_only"
+            evidence_text = f"仅{female.name}有{label}评价证据。"
+        elif male_score is not None:
+            coverage = "male_only"
+            evidence_text = f"仅{male.name}有{label}评价证据。"
+        else:
+            coverage = "missing"
+            evidence_text = f"双方均缺少{label}评价证据。"
+        dimensions.append({
+            "code": code,
+            "label": label,
+            "female_score": female_score,
+            "male_score": male_score,
+            "coverage": coverage,
+            "evidence_text": evidence_text,
+        })
+    return {
+        "female": {"variety_id": female.variety_id, "name": female.name,
+                   **_serialize_five_trait(female.five_trait)},
+        "male": {"variety_id": male.variety_id, "name": male.name,
+                 **_serialize_five_trait(male.five_trait)},
+        "dimensions": dimensions,
+        "covered_dimension_count": sum(item["coverage"] != "missing" for item in dimensions),
+        "boundary": "组合层面仅对照双亲已有五性证据，不计算后代五性得分或育种成功率。",
     }
 
 
@@ -421,21 +506,32 @@ class ParentRecommendationEngine:
             male_contributions = [condition.label for condition, result in preferences
                                   if condition.scope is not ConditionScope.PAIR and
                                   evaluate_candidate_condition(male, condition, request.target_region).state is EvidenceState.PASS]
+            qualification_reasons = [reason for item in hard if item.state is EvidenceState.PASS
+                                     for reason in item.reasons]
+            if role_state is EvidenceState.PASS and request.mode is not RecommendationMode.CONVENTIONAL:
+                qualification_reasons.append("双亲角色满足当前杂交稻配组模式。")
+            if kinship.level is KinshipLevel.LOW:
+                qualification_reasons.extend(kinship.reasons)
             record = {
                 "female_parent": {"variety_id": female.variety_id, "name": female.name,
-                                  "variety_type": female.variety_type, "source_url": female.source_url},
+                                  "variety_type": female.variety_type, "source_url": female.source_url,
+                                  "five_trait": _serialize_five_trait(female.five_trait)},
                 "male_parent": {"variety_id": male.variety_id, "name": male.name,
-                                "variety_type": male.variety_type, "source_url": male.source_url},
+                                "variety_type": male.variety_type, "source_url": male.source_url,
+                                "five_trait": _serialize_five_trait(male.five_trait)},
                 "target_match": round(target_match, 4),
                 "evidence_coverage": round(coverage, 4),
                 "confidence": confidence,
+                "qualification_reasons": qualification_reasons,
                 "female_contributions": female_contributions,
                 "male_contributions": male_contributions,
                 "recommendation_reasons": [
                     *(f"{female.name}可贡献：{item}" for item in female_contributions),
                     *(f"{male.name}可贡献：{item}" for item in male_contributions),
                 ],
-                "condition_outcomes": [_serialize_outcome(item) for item in outcomes],
+                "five_trait_evaluation": _pair_five_trait(female, male),
+                "condition_outcomes": [_serialize_outcome(item, condition)
+                                       for condition, item in zip(request.conditions, outcomes)],
                 "kinship": {
                     "level": kinship.level.value,
                     "reasons": list(kinship.reasons),

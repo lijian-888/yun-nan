@@ -18,6 +18,7 @@ from .parent_recommendation_engine import (
     ConditionKind,
     ConditionScope,
     EvidencePoint,
+    FiveTraitProfile,
     ParentRole,
     PedigreeProfile,
     RecommendationRequest,
@@ -310,6 +311,13 @@ class RiceDataParentRepository:
             JOIN agent_query.ricedata__rice_variety v ON v.variety_id=y.variety_id
             WHERE y.variety_id=ANY(:ids)
         """, params)
+        five_trait_rows = _rows(self.session, """
+            SELECT variety_id,yield_score,stability_score,disease_score,stress_score,quality_score,
+                   comprehensive_score,comprehensive_rank,scored_dimension_count,missing_dimensions,
+                   evaluation_status,evaluation_profile_id,evidence_summary,interpretation_boundary
+            FROM ai.ricedata_five_trait_comprehensive_evaluation
+            WHERE variety_id=ANY(:ids)
+        """, params)
         snapshots = _rows(self.session, """
             SELECT DISTINCT ON (variety_id) pedigree_snapshot_id,variety_id,max_depth,fully_expanded
             FROM agent_query.ricedata__rice_pedigree_snapshot
@@ -326,6 +334,25 @@ class RiceDataParentRepository:
             FROM agent_query.ricedata__rice_pedigree_edge WHERE pedigree_snapshot_id=ANY(:ids)
         """, {"ids": snapshot_ids or [-1]})
         pedigrees = _ancestor_profiles(ids, snapshots, nodes, edges, request.kinship.depth)
+        five_traits = {
+            int(row["variety_id"]): FiveTraitProfile(
+                yield_score=float(row["yield_score"]) if row.get("yield_score") is not None else None,
+                stability_score=float(row["stability_score"]) if row.get("stability_score") is not None else None,
+                disease_score=float(row["disease_score"]) if row.get("disease_score") is not None else None,
+                stress_score=float(row["stress_score"]) if row.get("stress_score") is not None else None,
+                quality_score=float(row["quality_score"]) if row.get("quality_score") is not None else None,
+                comprehensive_score=(float(row["comprehensive_score"])
+                                     if row.get("comprehensive_score") is not None else None),
+                comprehensive_rank=(int(row["comprehensive_rank"])
+                                    if row.get("comprehensive_rank") is not None else None),
+                scored_dimension_count=int(row.get("scored_dimension_count") or 0),
+                missing_dimensions=tuple(row.get("missing_dimensions") or ()),
+                evaluation_status=str(row.get("evaluation_status") or "not_evaluated"),
+                evaluation_profile_id=str(row.get("evaluation_profile_id") or ""),
+                evidence_summary=dict(row.get("evidence_summary") or {}),
+                interpretation_boundary=str(row.get("interpretation_boundary") or ""),
+            ) for row in five_trait_rows
+        }
 
         evidence: dict[int, dict[str, list[EvidencePoint]]] = {item: {} for item in ids}
         approval_by_id = {int(row["approval_id"]): row for row in approvals}
@@ -386,6 +413,7 @@ class RiceDataParentRepository:
             attributes=variety_attributes(str(row.get("variety_type") or "")),
             evidence={key: tuple(values) for key, values in evidence[int(row["variety_id"])].items()},
             pedigree=pedigrees[int(row["variety_id"])],
+            five_trait=five_traits.get(int(row["variety_id"]), FiveTraitProfile()),
             source_url=str(row.get("source_url") or ""),
         ) for row in base]
 

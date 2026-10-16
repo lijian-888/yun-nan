@@ -7,6 +7,7 @@ from app.parent_recommendation_engine import (
     ConditionScope,
     ConditionSpec,
     EvidencePoint,
+    FiveTraitProfile,
     KinshipPolicy,
     ParentRecommendationEngine,
     ParentRole,
@@ -29,7 +30,7 @@ def point(field, value, source, *, region="云南", status="accepted"):
 
 
 def candidate(variety_id, name, *, role=ParentRole.CONVENTIONAL, yield_change=5,
-              disease=3, complete=5, ancestors=None):
+              disease=3, complete=5, ancestors=None, five_trait=None):
     return CandidateProfile(
         variety_id=variety_id,
         name=name,
@@ -41,6 +42,7 @@ def candidate(variety_id, name, *, role=ParentRole.CONVENTIONAL, yield_change=5,
             "leaf_blast_grade": (point("leaf_blast_grade", disease, f"disease:{variety_id}"),),
         },
         pedigree=PedigreeProfile(ancestors or {}, complete),
+        five_trait=five_trait or FiveTraitProfile(),
         source_url=f"https://www.ricedata.cn/variety/{variety_id}",
     )
 
@@ -146,6 +148,31 @@ class ParentRecommendationEngineTests(unittest.TestCase):
             MemoryRiceDataRepository([untrusted, candidate(2, "已核验")]),
         )
         self.assertEqual(result["pending_verification"][0]["tier"], "pending")
+
+    def test_formal_pair_explains_qualification_and_compares_parent_five_traits(self):
+        female_traits = FiveTraitProfile(
+            yield_score=72.0, disease_score=81.0, scored_dimension_count=2,
+            missing_dimensions=("稳产", "耐逆", "品质"),
+            evaluation_status="not_eligible_missing_dimensions",
+        )
+        male_traits = FiveTraitProfile(
+            stability_score=76.0, quality_score=88.0, scored_dimension_count=2,
+            missing_dimensions=("丰产", "抗病", "耐逆"),
+            evaluation_status="not_eligible_missing_dimensions",
+        )
+        result = self.engine.recommend(
+            request(self.yield_preference, self.disease_gate),
+            MemoryRiceDataRepository([
+                candidate(1, "甲", five_trait=female_traits),
+                candidate(2, "乙", five_trait=male_traits),
+            ]),
+        )
+        item = result["recommendations"][0]
+        self.assertTrue(item["qualification_reasons"])
+        self.assertEqual(item["five_trait_evaluation"]["covered_dimension_count"], 4)
+        self.assertEqual(item["five_trait_evaluation"]["female"]["scored_dimension_count"], 2)
+        self.assertIsNone(item["five_trait_evaluation"].get("offspring_score"))
+        self.assertIn("不计算后代五性得分", item["five_trait_evaluation"]["boundary"])
 
 
 if __name__ == "__main__":
