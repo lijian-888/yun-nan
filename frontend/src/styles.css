@@ -519,6 +519,9 @@ body:has(.research-shell), body:has(.assistant-loading), body:has(.auth-error) {
 .parent-pair-card .tier-a { background: #1f795d; }.parent-pair-card .tier-b { background: #5e8451; }.parent-pair-card .tier-c { background: #9b7a3d; }.parent-pair-card .tier-pending { background: #b06c2d; }.parent-pair-card .tier-excluded { background: #9b4a42; }
 .parent-review-actions { display: flex; align-items: center; gap: 7px; margin-top: 12px; color: #5d766c; font-size: 12px; }
 .parent-review-actions button:disabled { cursor: wait; opacity: .55; }
+.parent-review-actions button.selected { border-color: #24745e; color: #fff; background: #24745e; }
+.parent-review-actions em { color: #8a6b2f; font-style: normal; }
+.parent-review-actions strong { color: #216a55; }
 .pair-qualification { margin: 14px 0; border-left: 3px solid #2d876d; padding: 10px 12px; color: #385f52; background: #f2f8f5; font-size: 12px; }
 .pair-qualification > strong { color: #185b48; font-size: 13px; }.pair-qualification b { display: block; margin-top: 9px; color: #517266; }
 .pair-qualification ul { margin: 6px 0 0; padding-left: 18px; }.pair-qualification li { margin: 3px 0; line-height: 1.55; }

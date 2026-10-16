@@ -4,9 +4,14 @@ from unittest.mock import AsyncMock, patch
 
 from pydantic import ValidationError
 
-from app.ai_gateway import AIProviderSettings
+from app.ai_gateway import AIGatewayConcurrencyGate, AIProviderSettings
+from app.auth import CurrentUser
 from app.parent_goal_parser import parse_parent_goal
-from app.parent_recommendation_api import RecommendationRunPayload, goal_progress_events
+from app.parent_recommendation_api import (
+    RecommendationRunPayload,
+    create_parent_recommendation_router,
+    goal_progress_events,
+)
 from app.parent_recommendation_engine import ParentRecommendationEngine
 from app.parent_recommendation_report import recommendation_v2_csv, recommendation_v2_pdf
 from backend.tests.test_parent_recommendation_engine import MemoryRiceDataRepository, candidate, request
@@ -152,6 +157,42 @@ class ParentRecommendationApiTests(unittest.TestCase):
         )
         self.assertTrue(recommendation_v2_csv(result).startswith(b"\xef\xbb\xbf"))
         self.assertTrue(recommendation_v2_pdf(result).startswith(b"%PDF"))
+
+    def test_reviewer_capability_is_exposed_before_the_user_clicks_review(self):
+        class FakeSession:
+            def __init__(self, assigned):
+                self.assigned = assigned
+
+            def scalar(self, _statement, parameters):
+                self.parameters = parameters
+                return self.assigned
+
+        router = create_parent_recommendation_router(
+            require_researcher=lambda: None,
+            require_field_admin=lambda: None,
+            get_session=lambda: None,
+            institution_id="ynaas",
+            project_id="default",
+            ai_gate=AIGatewayConcurrencyGate(),
+            ai_queue_wait_seconds=1,
+        )
+        route = next(
+            item for item in router.routes
+            if item.path.endswith("/review-capability") and "GET" in item.methods
+        )
+        user = CurrentUser(
+            id="expert-subject", username="expert", display_name="育种专家",
+            roles=frozenset({"researcher"}),
+        )
+
+        self.assertEqual(
+            route.endpoint(user=user, session=FakeSession(True)),
+            {"can_review": True, "reviewer_id": "expert-subject"},
+        )
+        self.assertEqual(
+            route.endpoint(user=user, session=FakeSession(None)),
+            {"can_review": False, "reviewer_id": "expert-subject"},
+        )
 
 
 if __name__ == "__main__":

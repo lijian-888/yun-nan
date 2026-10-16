@@ -465,6 +465,17 @@ def create_parent_recommendation_router(
             raise HTTPException(404, "未找到当前账号创建的亲本推荐记录。")
         return dict(result)
 
+    def reviewer_enabled(user, session: Session) -> bool:
+        return session.scalar(text("""
+            SELECT enabled FROM breeding_reviewer_assignment
+            WHERE institution_id=:institution_id AND user_id=:user_id
+        """), {"institution_id": institution_id, "user_id": user.id}) is True
+
+    @router.get("/review-capability")
+    def review_capability(user=Depends(require_researcher), session: Session = Depends(get_session)):
+        """Tell the UI whether this identity may make expert breeding decisions."""
+        return {"can_review": reviewer_enabled(user, session), "reviewer_id": user.id}
+
     @router.get("/runs/{run_id}/result.csv")
     def export_csv(run_id: str, user=Depends(require_researcher), session: Session = Depends(get_session)):
         return Response(recommendation_v2_csv(owned_result(run_id, user, session)),
@@ -480,11 +491,7 @@ def create_parent_recommendation_router(
     @router.post("/runs/{run_id}/review")
     def review(run_id: str, payload: ReviewPayload, user=Depends(require_researcher),
                session: Session = Depends(get_session)):
-        assigned = session.scalar(text("""
-            SELECT enabled FROM breeding_reviewer_assignment
-            WHERE institution_id=:institution_id AND user_id=:user_id
-        """), {"institution_id": institution_id, "user_id": user.id})
-        if assigned is not True:
+        if not reviewer_enabled(user, session):
             raise HTTPException(403, "当前账号没有育种审核权限。")
         run_row = session.execute(text("""
             SELECT result_json FROM parent_recommendation_run_v2
