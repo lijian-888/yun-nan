@@ -3,7 +3,7 @@ import argparse,fcntl,hashlib,json,os,time
 from pathlib import Path
 from sqlalchemy import create_engine,text
 from app.pedigree_direct import fragment,semantic_signature
-from refresh_ricedata_pedigree import collect,parse_source,CollectionDeferred
+from refresh_ricedata_pedigree import collect,parse_source,CollectionDeferred,SourceExpansionAmbiguity
 from rebuild_ricedata_pedigrees import pace_requests,write_json,load_json
 
 
@@ -96,6 +96,11 @@ def run(args):
         except CollectionDeferred:
             with engine.begin() as c:c.execute(text("UPDATE ricedata.rice_pedigree_direct_job SET priority=100 WHERE source_id=:id"),{'id':sid})
             print(json.dumps(dict(source_id=sid,status='direct_fragment_deferred')),flush=True)
+        except SourceExpansionAmbiguity as exc:
+            # A deterministic source UI collision is not a transient request error.
+            with engine.begin() as c:
+                c.execute(text("UPDATE ricedata.rice_pedigree_direct_job SET error=:error,status='needs_review' WHERE source_id=:id"),dict(id=sid,error=type(exc).__name__+': '+str(exc)))
+            print(json.dumps(dict(source_id=sid,status='source_action_collision',error=str(exc)),ensure_ascii=False),flush=True)
         except Exception as exc:
             with engine.begin() as c:c.execute(text("UPDATE ricedata.rice_pedigree_direct_job SET attempts=attempts+1,error=:error,priority=100,status=CASE WHEN attempts>=2 THEN 'needs_review' ELSE 'pending' END WHERE source_id=:id"),dict(id=sid,error=type(exc).__name__+': '+str(exc)))
             if getattr(getattr(exc,'response',None),'status_code',None) in (403,429):

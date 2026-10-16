@@ -21,3 +21,13 @@ direct_queue_finished 仅表示直接采集队列结束；来源缺失、needs_r
 
 沿用 /data/research/pedigree-rebuild/request-rate.lock 及 source-blocked.json，
 不提高原站请求启动频率，不绕过 403/429。部署后需更新定时检查，监控新服务和新进度路径。
+
+## 2026年10月16日专项排查
+
+27项 needs_review 已离线回放并逐项重新请求原站：不同具名节点具有相同 TreeView toggle 参数，点击后已有分支被折叠。采集器现在将此情形报告为 SourceExpansionAmbiguity，直接进入 needs_review，不将其当作网络故障重复重试。原始名称、来源 HTML、点击前后页面及丢失路径保存在 `/data/research/pedigree-direct/recovery-audit-20261016/audit.json` 及相邻证据文件；没有将无法展开的节点当作已知叶节点。恢复需原站修复或有授权的关系导出，不按复合名称猜测亲本。
+
+`recover_pedigree_aliases.py` 仅处理两项明确、同来源 ID 的名称差异。先核实来源引用中的 ID 和原名，并重新获取独立档案的直接关系，与既存签名一致后，才以原系谱名保存带证据的关系片段。保留已有事实和原始简称，不做全库按名称或单独 ID 的无条件合并。
+
+荃广优8238的上述名称缺口已补齐，本地/API图谱336节点405关系，但独立全树核验未完成前不得宣布 source verified。独立容器为 `ynaas-trial-pedigree-verify-631806`，结果在 `recovery-audit-20261016/independent-631806/result.json`。`verified` 必须同时满足全树确实展开完毕，名称路径及出现次数完全一致；`source_collection_incomplete` 或 `differences_found` 均不通过。其共享限速不变，运行时不要开启第二个原站采集通道。
+
+修复采集镜像为 `ynaas-trial-api:pedigree-recovery-20261016`，运行时最后追加服务器 `/home/lijian/apps/ynaas-trial-direct-9b12472/audit/recovery-worker.yml`；它只覆盖采集服务镜像，不能替换 API/Web 的已部署版本。旧采集队列在无 pending 时正常退出，27项来源缺陷未解决时保持 needs_review，不盲目重排。

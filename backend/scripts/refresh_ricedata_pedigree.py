@@ -169,6 +169,28 @@ class CollectionDeferred(Exception):
         self.state=state
 
 
+class SourceExpansionAmbiguity(ValueError):
+    """Original TreeView assigns one action to multiple distinct occurrences."""
+
+
+def repeated_action_error(html, argument):
+    document=source_document(html)
+    tree=document.find(id='pedigree')
+    labels=[]
+    if tree is not None:
+        for table in tree.find_all('table',recursive=False):
+            row=table.find('tr')
+            cells=row.find_all('td',recursive=False) if row else []
+            if len(cells)<2:continue
+            toggle=cells[-2].find('a')
+            match=re.search(r"__doPostBack\('pedigree','([^']+)'\)",toggle.get('href','')) if toggle else None
+            if match and match[1].replace('\\\\','\\')==argument:
+                labels.append(cells[-1].get_text(' ',strip=True))
+    if len(labels)>1:
+        return SourceExpansionAmbiguity('Source action collision between occurrences: '+repr(labels)+'; no inferred relationships or repeated toggle')
+    return ValueError('Source expansion did not complete; no import')
+
+
 def collect(source_id, limit=10000, delay=.5, *, resume=None, on_progress=None,
             slice_seconds=None, slice_expansions=None, before_request=None, direct_only=False):
     url = f"https://www.ricedata.cn/variety/pedigree.aspx?id={source_id}&fromid="
@@ -240,8 +262,10 @@ def collect(source_id, limit=10000, delay=.5, *, resume=None, on_progress=None,
                 (slice_expansions is not None and len(expanded)-initial_expansions>=slice_expansions)):
                 raise CollectionDeferred(state)
             argument = eligible[0]
-            if argument in expanded or len(expanded) >= limit:
-                raise ValueError("Expansion incomplete or exceeds bound; no import")
+            if argument in expanded:
+                raise repeated_action_error(html,argument)
+            if len(expanded) >= limit:
+                raise ValueError('Source expansion bound reached; no import')
             previous=paths
             fields.update(__EVENTTARGET="pedigree", __EVENTARGUMENT=argument)
             html=request('post',data=fields)
