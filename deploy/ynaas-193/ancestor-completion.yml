@@ -1,0 +1,14 @@
+services:
+  pedigree-ancestors:
+    image: ynaas-trial-api:ancestor-completion-20261016
+    profiles: [pedigree-ancestors]
+    command: [python, /app/scripts/complete_ricedata_ancestors.py]
+    environment:
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+      MIGRATION_DATABASE_URL: postgresql+psycopg://rice:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ynaas_rice_ai
+    volumes:
+      - research_data:/data/research
+    restart: on-failure:3
+    mem_limit: 1g
+    cpus: 0.5

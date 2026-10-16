@@ -1,0 +1,3 @@
+services:
+  api:
+    image: ynaas-trial-api:ancestor-completion-20261016

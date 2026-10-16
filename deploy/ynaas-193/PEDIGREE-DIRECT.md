@@ -31,3 +31,23 @@ direct_queue_finished 仅表示直接采集队列结束；来源缺失、needs_r
 荃广优8238的上述名称缺口已补齐，本地/API图谱336节点405关系，但独立全树核验未完成前不得宣布 source verified。独立容器为 `ynaas-trial-pedigree-verify-631806`，结果在 `recovery-audit-20261016/independent-631806/result.json`。`verified` 必须同时满足全树确实展开完毕，名称路径及出现次数完全一致；`source_collection_incomplete` 或 `differences_found` 均不通过。其共享限速不变，运行时不要开启第二个原站采集通道。
 
 当前 API 与直接采集镜像为 `ynaas-trial-api:source-limited-20261016`，运行时在现有 public-domain.yml 后追加服务器 `/home/lijian/apps/ynaas-trial-direct-9b12472/audit/source-limited.yml`，保留域名、认证及 Web 配置。33758项 complete、27项 source_limited；队列无 pending 时正常退出，27项已按受限策略处理，不再作为待修复失败重复通知。独立全树核验容器不受此次变更影响。
+
+## 全库祖先缺口补全（2026年10月16日）
+
+用户授权补全全部16285个祖先图不完整品种，优先云粳39号（variety_id=969、source_id=612639）。基线目录33784品种，按实际API优先快照规则，本地闭合17499、不完整16285；闭合不是全部经过独立官网全树验证。直接片段任务complete绝不参与此完成判定。
+
+启动时进一步检查到岳州玉占（536/633231）、松雅500（537/633230）两份旧source_verified快照含未知名称，先前只看数据库fully_expanded标记把它们误计完整。纠正后的启动基线为本地闭合17497、不完整16287；原16285项全部保留，另2项补入队列。统计必须检查实际名称，不能只信旧完整标记。
+
+`complete_ricedata_ancestors.py` 维护 `/data/research/pedigree-direct/ancestor-completion/queue.sqlite3`，包含全部不完整品种，而非只列27项展开冲突。`baseline.json`固定启动基线，`progress.json`分别统计pending、awaiting_source、collecting_source、closed_local、verified_source、source_limited、needs_review。closed_local只代表本地祖先引用闭合，不代表独立官网全树逐条核验。source_limited/needs_review均不是完整，不因队列一轮结束而宣布完成。
+
+续接只接受同来源编号、官网明示的括号别名或去括号后的完整原名，并重新获取规范档案的直接关系，与既有来源签名一致；多种候选关系冲突、不明确简称和仅同编号均不自动合并。保留原系谱名和来源证据；无编号中间节点重新隔离上下文。当前规范页面每个编号只核实一次，共享结果，减少重复原站请求。证据保存在canonical目录及alias-evidence.jsonl。
+
+不能安全续接的品种从自身官网完整树采集，按55秒/40展开切片轮转，保留full-source下断点。全部可展开节点实际展开后，检查未知名称和同路径来源身份回环；再追加来源核验快照，不覆盖已有事实。用实际API图谱序列化路径比较所有名称路径和重复出现次数，完全一致才写verified_source结果。云粳39号无论本地是否先闭合，都执行这一独立全树核验。
+
+部署镜像`ynaas-trial-api:ancestor-completion-20261016`，服务`pedigree-ancestors`，容器`ynaas-trial-pedigree-ancestors-1`。在已有域名/直接服务配置后追加`ancestor-completion.yml`，仅启动该服务，不改API/Web/认证服务。保持一个原站请求通道，继续使用旧共享限速与403/429阻断文件；旧direct/rebuild/complex及荃广优8238独立核验容器退出不属异常，不重复启动。
+
+另追加`ancestor-api.yml`升级API的快照完整度统计：未知名称快照不计verified_count，列表标source_incomplete。它不把direct_count当祖先完整数；认证与域名环境继续使用已有public-domain.yml，API重建后重载Web nginx上游解析。后续部署须同时保留ancestor-api.yml和ancestor-completion.yml，避免退回旧完整度统计。
+
+荃广优8238独立核验已于2026-10-16T01:38:32Z完成，1214个名称路径出现项与本地图完全一致，missing_paths/extra_paths为空。此次全库任务不重复采它。
+
+云粳39号已于2026-10-16T02:24:31Z独立完整核验：120图谱节点、156关系，756个名称路径出现项与原站完全一致，无missing_paths或extra_paths；追加快照43421，旧快照保留。source SHA-256为649e50ea055372168222b9cd0cc5eb3b20d0ee96d4cb04d22800e2ea134223c8a。API角色实际读取也为120/156、fully_expanded=true、无警告和未知名称。来源、完整节点、原始HTML、核验结果存于ancestor-completion/full-source/612639，不能把756个分支出现项说成756个独立材料。

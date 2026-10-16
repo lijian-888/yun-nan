@@ -17,8 +17,13 @@ GROUP_NAMES = {"indica": "籼稻", "japonica": "粳稻", "mixed": "籼粳交", "
 GROUP_SQL = """CASE WHEN strpos(COALESCE(v.variety_type,''),'籼粳')>0 THEN 'mixed'
     WHEN v.variety_type LIKE '籼%' THEN 'indica' WHEN v.variety_type LIKE '粳%' THEN 'japonica'
     ELSE 'other' END"""
-LATEST_SQL = """SELECT DISTINCT ON (variety_id) variety_id,pedigree_snapshot_id,node_count,edge_count,max_depth,fully_expanded,crawled_at
-    FROM agent_query.ricedata__rice_pedigree_snapshot WHERE source_verified ORDER BY variety_id,crawled_at DESC,pedigree_snapshot_id DESC"""
+LATEST_SQL = """SELECT DISTINCT ON (p.variety_id) p.variety_id,p.pedigree_snapshot_id,p.node_count,p.edge_count,p.max_depth,
+    (p.fully_expanded AND NOT EXISTS (
+        SELECT 1 FROM agent_query.ricedata__rice_pedigree_node n WHERE n.pedigree_snapshot_id=p.pedigree_snapshot_id
+        AND (n.material_name IS NULL OR btrim(n.material_name) IN ('','0','?','？'))
+    )) AS fully_expanded,p.crawled_at
+    FROM agent_query.ricedata__rice_pedigree_snapshot p WHERE p.source_verified
+    ORDER BY p.variety_id,p.crawled_at DESC,p.pedigree_snapshot_id DESC"""
 
 
 def rows(session, sql, params=None):
@@ -37,7 +42,7 @@ def catalog(session):
     groups = rows(session, f"""WITH latest AS ({LATEST_SQL})
         SELECT {GROUP_SQL} AS code,count(*) AS count,
           count(*) FILTER(WHERE COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges'),0)>0) AS with_pedigree,
-          count(*) FILTER(WHERE s.pedigree_snapshot_id IS NOT NULL) AS verified,
+          count(*) FILTER(WHERE s.pedigree_snapshot_id IS NOT NULL AND s.fully_expanded) AS verified,
           count(*) FILTER(WHERE f.status='verified_direct') AS direct_collected,
           count(*) FILTER(WHERE f.status='verified_partial') AS source_limited
         FROM agent_query.ricedata__rice_variety v LEFT JOIN latest s USING(variety_id)
@@ -74,7 +79,7 @@ def list_varieties(session, keyword="", group="", only_pedigree=False, page=1, p
         v.source_variety_id AS source_id,COALESCE(v.trial_names,ARRAY[]::text[]) || COALESCE(v.former_names,ARRAY[]::text[]) AS aliases,
         COALESCE(s.node_count,jsonb_array_length(f.fragment->'nodes')) AS node_count,
         COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges')) AS edge_count,s.max_depth,s.fully_expanded,
-        CASE WHEN s.pedigree_snapshot_id IS NOT NULL THEN 'verified' WHEN f.status='verified_partial' THEN 'source_limited' WHEN f.fact_key IS NOT NULL THEN 'direct_collected' ELSE 'pending_verification' END AS pedigree_status
+        CASE WHEN s.pedigree_snapshot_id IS NOT NULL AND s.fully_expanded THEN 'verified' WHEN s.pedigree_snapshot_id IS NOT NULL THEN 'source_incomplete' WHEN f.status='verified_partial' THEN 'source_limited' WHEN f.fact_key IS NOT NULL THEN 'direct_collected' ELSE 'pending_verification' END AS pedigree_status
         {join} WHERE {where}
         ORDER BY CASE WHEN lower(v.variety_name)=lower(:exact) THEN 0 ELSE 1 END,v.variety_name,v.variety_id
         LIMIT :limit OFFSET :offset""", params)

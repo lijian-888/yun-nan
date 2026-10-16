@@ -1,0 +1,5 @@
+FROM ynaas-trial-api:source-limited-20261016
+COPY pedigree_completion.py /app/app/
+COPY pedigree_graph.py /app/app/
+COPY complete_ricedata_ancestors.py /app/scripts/
+COPY test_pedigree_completion.py /app/tests/

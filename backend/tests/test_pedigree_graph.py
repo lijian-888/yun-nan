@@ -27,6 +27,12 @@ class PedigreeTests(unittest.TestCase):
         self.assertTrue(any("尚未完整采集" in w for w in graph['warnings']))
         self.assertTrue(any("不表示" in w for w in graph['warnings']))
 
+    def test_old_verified_flag_does_not_make_unknown_name_complete(self):
+        graph=serialize_graph(dict(id=1,source_url=None),dict(fully_expanded=True,node_count=1,edge_count=0),
+                              [dict(id=1,name='0',is_root=True,source_url=None)],[])
+        self.assertFalse(graph['snapshot']['fully_expanded'])
+        self.assertEqual(graph['nodes'][0]['name'],'亲本名称待核实')
+
     def test_shared_ancestors_and_cycles_terminate(self):
         nodes=[dict(id=i,is_root=i==1,source_url=None) for i in range(1,6)]
         edges=[dict(id=i,child_id=c,parent_id=p) for i,(c,p) in enumerate([(1,2),(1,3),(2,4),(3,4),(4,1)])]
