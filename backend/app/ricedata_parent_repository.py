@@ -257,7 +257,7 @@ class RiceDataParentRepository:
             FROM agent_query.ricedata__rice_variety_trait_measurement m
             JOIN agent_query.ricedata__rice_variety_trait_summary s ON s.trait_summary_id=m.trait_summary_id
             JOIN agent_query.ricedata__rice_variety_approval a ON a.approval_id=s.approval_id
-            JOIN agent_query.ricedata__rice_variety v ON v.variety_id=s.variety_id
+            JOIN agent_query.ricedata__rice_variety v ON v.variety_id=a.variety_id
             WHERE a.variety_id=ANY(:ids)
         """, params)
         narratives = _rows(self.session, """

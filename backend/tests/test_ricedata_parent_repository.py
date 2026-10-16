@@ -10,7 +10,7 @@ class RiceDataParentRepositoryTests(unittest.TestCase):
         source = inspect.getsource(RiceDataParentRepository)
         self.assertNotIn("s.variety_id", source)
         self.assertIn("ta.variety_id", source)
-        self.assertIn("a.variety_id", source)
+        self.assertIn("v.variety_id=a.variety_id", source)
 
     def test_role_classification_keeps_unknown_sterile_line_out_of_a_specific_system(self):
         self.assertEqual(classify_roles("籼型三系不育系", "甲A"), frozenset({ParentRole.STERILE_THREE_LINE}))
