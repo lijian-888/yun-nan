@@ -18,7 +18,11 @@ export async function request(path, options = {}) {
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
-    throw new Error(readableError(response.status, body));
+    const error = new Error(readableError(response.status, body));
+    error.status = response.status;
+    error.transient = response.status === 502 || response.status === 503 || response.status === 504
+      || (typeof body === "string" && (/^<!?doctype html/i.test(body.trim()) || /^<html/i.test(body.trim())));
+    throw error;
   }
   return body;
 }
@@ -27,7 +31,7 @@ function readableError(status, body) {
   if (typeof body !== "string") return body?.detail || "请求失败";
   const text = body.trim();
   if (status === 504 || /^<!?doctype html/i.test(text) || /^<html/i.test(text)) {
-    return "服务器仍在处理，但入口等待超时。请稍后重试；系统不会使用未完成的解析结果。";
+    return "服务器入口等待超时，系统正在尝试恢复连接。";
   }
   return text || "请求失败";
 }

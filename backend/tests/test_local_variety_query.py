@@ -22,6 +22,31 @@ def history(result):
 
 
 class QueryContractTests(unittest.TestCase):
+    @patch("app.ricedata_variety_overview.resolve_varieties", return_value=[])
+    @patch("app.ricedata_variety_overview._rows_for_approvals", return_value=[])
+    @patch("app.ricedata_variety_overview._rows")
+    def test_multi_approval_overview_uses_bounded_batch_queries(self, rows, approval_rows, _resolve):
+        approvals = [
+            {"approval_id": item, "approval_no": f"审定{item}", "approval_year": 2000 + item,
+             "approval_region": "云南", "yield_performance_text": None,
+             "suitable_area_text": None, "approval_opinion_text": None}
+            for item in range(1, 7)
+        ]
+
+        def result_for(_session, query, _params):
+            if "FROM ricedata.rice_variety WHERE" in query:
+                return [{"variety_id": 1077, "variety_name": "美香占2号", "source_variety_id": "1077", "source_url": None}]
+            if "FROM ricedata.rice_variety_approval" in query:
+                return approvals
+            return []
+
+        rows.side_effect = result_for
+        result = lookup_variety_overview(None, "全部表型数据", variety_id=1077)
+
+        self.assertEqual(result["content"].count("### "), 6)
+        self.assertLessEqual(rows.call_count + approval_rows.call_count, 6,
+                             "审定记录增加时，数据库查询次数不应线性增长")
+
     @patch("app.local_variety_query._rows")
     def test_split_observation_value_and_unit_support_grounded_answer(self, rows):
         rows.return_value = [{"raw_value": "24.69", "value_text": None, "value_numeric": 24.69,

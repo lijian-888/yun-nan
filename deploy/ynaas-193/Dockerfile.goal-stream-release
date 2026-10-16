@@ -6,3 +6,4 @@ FROM ${BASE_API_IMAGE}
 COPY backend/app/parent_goal_parser.py /app/app/parent_goal_parser.py
 COPY backend/app/parent_recommendation_api.py /app/app/parent_recommendation_api.py
 COPY backend/app/parent_recommendation_engine.py /app/app/parent_recommendation_engine.py
+COPY backend/app/ricedata_variety_overview.py /app/app/ricedata_variety_overview.py
