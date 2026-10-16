@@ -27,6 +27,14 @@ test("level expansion is based on directed graph, not F-generation claims",()=>{
   assert.deepEqual([...expandLevels(graph,1)],['1']);
   assert.equal(expandLevels(graph,3).has('4'),true);
 });
+
+test("five-level expansion shows five ancestor levels but leaves deeper ancestors collapsed",()=>{
+  const chain={root_ids:[0],nodes:Array.from({length:8},(_,id)=>({id,name:`材料${id}`})),
+    edges:Array.from({length:7},(_,id)=>({id,child_id:id,parent_id:id+1}))};
+  const visible=visiblePedigree(chain,expandLevels(chain,5));
+  assert.deepEqual(visible.nodes.map(n=>n.id),[0,1,2,3,4,5]);
+  assert.deepEqual(visible.edges.map(e=>e.id),[0,1,2,3,4]);
+});
 test("fit and zoom remain bounded and keep anchor fixed",()=>{
   const view=fitView({width:3000,height:4000},{width:1000,height:600});
   assert.ok(view.scale>=.08&&view.scale<=1.15);

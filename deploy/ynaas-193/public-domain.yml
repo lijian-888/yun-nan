@@ -11,7 +11,7 @@ services:
       KC_HOSTNAME: https://longyun-yn.e-farmer.cn/auth
       PUBLIC_PLATFORM_URL: https://longyun-yn.e-farmer.cn
   web:
-    image: ${YNAAS_DOMAIN_WEB_IMAGE:-ynaas-trial-web:public-domain-20261015}
+    image: ${YNAAS_DOMAIN_WEB_IMAGE:-ynaas-trial-web:pedigree-five-levels-20261016}
     build:
       args:
         VITE_KEYCLOAK_URL: https://longyun-yn.e-farmer.cn/auth
