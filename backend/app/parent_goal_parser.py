@@ -7,7 +7,7 @@ validated against the server-owned field catalog before it reaches the UI.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -23,13 +23,61 @@ MODE_LABELS = {
     "hybrid_two_line": "两系杂交稻配组",
 }
 
-GOAL_PARSER_VERSION = "ynaas-parent-goal-v2.1"
+GOAL_PARSER_VERSION = "ynaas-parent-goal-v2.2"
+
+CATEGORICAL_VALUE_ALIASES = {
+    "rice_type": {
+        "indica": "indica", "籼型": "indica", "籼稻": "indica",
+        "japonica": "japonica", "粳型": "japonica", "粳稻": "japonica",
+        "mixed": "mixed", "籼粳混合": "mixed", "籼粳型": "mixed",
+    },
+    "variety_kind": {
+        "inbred": "inbred", "常规稻": "inbred", "常规": "inbred",
+        "hybrid": "hybrid", "杂交稻": "hybrid", "杂交": "hybrid",
+        "sterile": "sterile", "不育系": "sterile",
+    },
+}
+
+HUMAN_TEXT_REPLACEMENTS = (
+    ("rice_type=indica", "籼粳类型=籼型"),
+    ("rice_type=japonica", "籼粳类型=粳型"),
+    ("rice_type=mixed", "籼粳类型=籼粳混合"),
+    ("variety_kind=inbred", "品种类型=常规稻"),
+    ("variety_kind=hybrid", "品种类型=杂交稻"),
+    ("variety_kind=sterile", "品种类型=不育系"),
+    ("rice_type", "籼粳类型"),
+    ("variety_kind", "品种类型"),
+    ("indica", "籼型"),
+    ("japonica", "粳型"),
+    ("mixed", "籼粳混合"),
+    ("inbred", "常规稻"),
+    ("hybrid", "杂交稻"),
+    ("sterile", "不育系"),
+)
+
+
+def humanize_goal_text(value: str) -> str:
+    text = value
+    for technical, chinese in HUMAN_TEXT_REPLACEMENTS:
+        text = text.replace(technical, chinese)
+    return text
+
+
+def normalize_categorical_value(field: str, value: Any) -> Any:
+    aliases = CATEGORICAL_VALUE_ALIASES.get(field)
+    if aliases is None:
+        return value
+    if isinstance(value, list):
+        return [normalize_categorical_value(field, item) for item in value]
+    if not isinstance(value, str):
+        return value
+    return aliases.get(value.strip().lower(), aliases.get(value.strip(), value))
 
 
 def supported_field_catalog() -> list[dict[str, str]]:
     base = [
-        {"field": "rice_type", "name": "籼粳类型", "unit": "", "value_hint": "indica、japonica、mixed"},
-        {"field": "variety_kind", "name": "品种类型", "unit": "", "value_hint": "inbred、hybrid、sterile"},
+        {"field": "rice_type", "name": "籼粳类型", "unit": "", "value_hint": "籼型(indica)、粳型(japonica)、籼粳混合(mixed)；value 使用括号内系统值"},
+        {"field": "variety_kind", "name": "品种类型", "unit": "", "value_hint": "常规稻(inbred)、杂交稻(hybrid)、不育系(sterile)；value 使用括号内系统值"},
         {"field": "variety_type", "name": "品种类型原文", "unit": "", "value_hint": "数据库原文关键词"},
         {"field": "approval_region", "name": "审定地区", "unit": "", "value_hint": "地区名称"},
         {"field": "yield_relative_change_pct", "name": "较对照增减产", "unit": "%", "value_hint": "数值"},
@@ -65,6 +113,14 @@ class GoalConditionDraft(BaseModel):
     require_trusted_evidence: bool = True
     evidence_policy: Literal["consistent", "worst"] = "consistent"
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_categorical_aliases(cls, data):
+        if not isinstance(data, dict):
+            return data
+        field = data.get("field")
+        return {**data, "value": normalize_categorical_value(field, data.get("value"))}
+
     @model_validator(mode="after")
     def validate_supported_field_and_value(self):
         supported = {item["field"] for item in supported_field_catalog()}
@@ -74,6 +130,11 @@ class GoalConditionDraft(BaseModel):
             raise ValueError("区间条件必须提供两个边界值")
         if self.operator == "in" and not isinstance(self.value, list):
             raise ValueError("集合条件必须提供选项列表")
+        aliases = CATEGORICAL_VALUE_ALIASES.get(self.field)
+        if aliases is not None:
+            values = self.value if isinstance(self.value, list) else [self.value]
+            if any(value not in set(aliases.values()) for value in values):
+                raise ValueError("分类条件的目标值不在数据库支持范围内")
         return self
 
 
@@ -115,6 +176,7 @@ GOAL_PARSER_CONTRACT = """
 5. 不创建花期相遇条件，除非目录中有用户给出可计算阈值的对应字段。系谱代数不在 conditions 中，由系统独立设置。
 6. mode 必须与输入完全一致，不得自行切换育种路线。
 7. 最多生成 30 个条件，不能输出目录外字段。
+8. label、summary、assumptions 和 unresolved_requirements 必须使用科研人员可读的中文，不得出现字段名或英文系统值；只有 conditions.field 和分类 conditions.value 使用目录规定的系统值。
 """.strip()
 
 
@@ -147,5 +209,8 @@ async def parse_parent_goal(
         # may extract a region only when the dedicated field was left blank.
         "target_region": target_region.strip() or draft.target_region,
         "conditions": normalized_conditions,
+        "summary": humanize_goal_text(draft.summary),
+        "assumptions": [humanize_goal_text(item) for item in draft.assumptions],
+        "unresolved_requirements": [humanize_goal_text(item) for item in draft.unresolved_requirements],
     })
 

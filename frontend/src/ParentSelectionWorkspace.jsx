@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, LoaderCircle, Plus, Scale, ShieldCheck, Trash2 } from "lucide-react";
 import { authorizedFetch, jsonRequest, request, streamJsonLines } from "./api";
 import RiceDataVarietyDrawer from "./RiceDataVarietyDrawer";
+import { conditionValueOptions, localizeConditionText } from "./conditionValuePresentation";
 
 const MODE_LABELS = {
   conventional: "常规稻杂交",
@@ -85,7 +86,9 @@ function ConditionEditor({ conditions, onChange }) {
     }]);
   }
   return <div className="parent-condition-editor">
-    {conditions.map((condition, index) => <article className="parent-condition-row" key={`${condition.code}-${index}`}>
+    {conditions.map((condition, index) => {
+      const valueOptions = conditionValueOptions(condition.field);
+      return <article className="parent-condition-row" key={`${condition.code}-${index}`}>
       <div className="parent-condition-heading">
         <input value={condition.label} aria-label="条件名称" onChange={(event) => update(index, { label: event.target.value })} />
         <button type="button" className="icon-button" title="删除条件" onClick={() => onChange(conditions.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={15} /></button>
@@ -93,16 +96,25 @@ function ConditionEditor({ conditions, onChange }) {
       <div className="parameter-grid">
         <label>判断字段<select value={condition.field} onChange={(event) => {
           const selected = FIELD_OPTIONS.find(([code]) => code === event.target.value);
-          update(index, { field: event.target.value, unit: selected?.[2] || "" });
+          const nextOptions = conditionValueOptions(event.target.value);
+          update(index, {
+            field: event.target.value,
+            unit: selected?.[2] || "",
+            ...(nextOptions.length ? { operator: "eq", value: nextOptions[0].value } : {}),
+          });
         }}>{FIELD_OPTIONS.map(([code, label]) => <option value={code} key={code}>{label}</option>)}</select></label>
         <label>条件性质<select value={condition.kind} onChange={(event) => update(index, { kind: event.target.value })}><option value="hard">硬门槛</option><option value="preference">排序偏好</option></select></label>
         <label>作用对象<select value={condition.scope} onChange={(event) => update(index, { scope: event.target.value })}>{Object.entries(SCOPE_LABELS).map(([code, label]) => <option value={code} key={code}>{label}</option>)}</select></label>
         <label>比较方式<select value={condition.operator} onChange={(event) => update(index, { operator: event.target.value })}><option value="between">在范围内</option><option value="gte">大于等于</option><option value="lte">小于等于</option><option value="gt">大于</option><option value="lt">小于</option><option value="eq">等于</option><option value="in">属于集合</option><option value="contains">包含文字</option></select></label>
-        <label>目标值{condition.unit ? `（${condition.unit}）` : ""}<input value={editableValue(condition)} onChange={(event) => update(index, { value: parsedValue(condition, event.target.value) })} placeholder={condition.operator === "between" ? "例如 120～160" : "填写目标值"} /></label>
+        <label>目标值{condition.unit ? `（${condition.unit}）` : ""}{valueOptions.length
+          ? <select value={String(condition.value ?? "")} onChange={(event) => update(index, { value: event.target.value })}>{valueOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+          : <input value={editableValue(condition)} onChange={(event) => update(index, { value: parsedValue(condition, event.target.value) })} placeholder={condition.operator === "between" ? "例如 120～160" : "填写目标值"} />}</label>
         {condition.kind === "preference" && <label>重要程度<select value={condition.importance || 2} onChange={(event) => update(index, { importance: Number(event.target.value) })}><option value={3}>关键</option><option value={2}>重要</option><option value={1}>一般</option></select></label>}
       </div>
       <label className="inline-check"><input type="checkbox" checked={condition.require_trusted_evidence !== false} onChange={(event) => update(index, { require_trusted_evidence: event.target.checked })} />只使用已核验或结构化可信证据</label>
-    </article>)}
+      {valueOptions.length > 0 && <small className="condition-value-help">请选择中文选项，系统会自动匹配数据库，无需填写英文或字段代码。</small>}
+    </article>;
+    })}
     <button type="button" onClick={add}><Plus size={15} />新增自定义条件</button>
   </div>;
 }
@@ -257,7 +269,7 @@ export default function ParentSelectionWorkspace({ onNotice }) {
       {error && <div className="workspace-error"><AlertTriangle size={17} />{error}</div>}
       <button className="primary-button" disabled={parsing || goal.trim().length < 2} onClick={parseGoal}>{parsing ? <LoaderCircle className="spin" size={16} /> : <Scale size={16} />}{parsing ? "大模型正在理解目标…" : "让大模型理解育种目标"}</button>
     </section>
-    {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 2</span><h3>核对大模型生成的条件草案</h3></header>{draftSummary && <p>{draftSummary}</p>}{assumptions.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>需确认的理解：{assumptions.join("；")}</span></div>}{unresolved.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>尚不能执行的目标：{unresolved.join("；")}。请补充阈值后重新解析，或在下方手工新增条件。</span></div>}<ConditionEditor conditions={conditions} onChange={(items) => { setConditions(items); setDraftConfirmed(false); }} /><label className="inline-check parent-draft-confirm"><input type="checkbox" checked={draftConfirmed} disabled={!conditions.length} onChange={(event) => setDraftConfirmed(event.target.checked)} />我已核对育种路线、硬门槛、排序偏好、作用对象和阈值，同意按当前条件执行。</label></section>}
+    {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 2</span><h3>核对大模型生成的条件草案</h3></header>{draftSummary && <p>{localizeConditionText(draftSummary)}</p>}{assumptions.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>需确认的理解：{assumptions.map(localizeConditionText).join("；")}</span></div>}{unresolved.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>尚不能执行的目标：{unresolved.map(localizeConditionText).join("；")}。请补充阈值后重新解析，或在下方手工新增条件。</span></div>}<ConditionEditor conditions={conditions} onChange={(items) => { setConditions(items); setDraftConfirmed(false); }} /><label className="inline-check parent-draft-confirm"><input type="checkbox" checked={draftConfirmed} disabled={!conditions.length} onChange={(event) => setDraftConfirmed(event.target.checked)} />我已核对育种路线、硬门槛、排序偏好、作用对象和阈值，同意按当前条件执行。</label></section>}
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 3</span><h3>设置候选范围和亲缘检查</h3></header><div className="parameter-grid"><label>自动召回候选数量<input type="number" min="2" max={mode === "conventional" ? 120 : 80} value={candidateLimit} onChange={(event) => setCandidateLimit(event.target.value)} /></label><label>检查祖先代数<select value={kinship.depth} onChange={(event) => { setKinship({ ...kinship, depth: Number(event.target.value), exclude_through_depth: Math.min(kinship.exclude_through_depth, Number(event.target.value)) }); setDraftConfirmed(false); }}><option value={3}>三代</option><option value={5}>五代</option></select></label><label>共同祖先排除范围<select value={kinship.exclude_through_depth} onChange={(event) => { setKinship({ ...kinship, exclude_through_depth: Number(event.target.value) }); setDraftConfirmed(false); }}><option value={2}>两代内</option><option value={3}>三代内</option>{kinship.depth === 5 && <option value={5}>五代内</option>}</select></label><label className="inline-check"><input type="checkbox" checked={kinship.require_complete_pedigree} onChange={(event) => { setKinship({ ...kinship, require_complete_pedigree: event.target.checked }); setDraftConfirmed(false); }} />系谱不完整时必须进入待核实</label></div><label>必评 RiceData 品种编号（可不填）<input value={pinned} onChange={(event) => setPinned(event.target.value)} placeholder="逗号分隔；必评仍不能绕过硬门槛" /></label><label>排除 RiceData 品种编号（可不填）<input value={excluded} onChange={(event) => setExcluded(event.target.value)} placeholder="逗号分隔" /></label></section>}
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 4</span><h3>执行确定性分析</h3></header><div className="workspace-warning"><ShieldCheck size={18} /><span>大模型只负责理解目标；品种筛选、三代/五代近亲判定和组合评分均由可复核规则完成。候选仅来自国家水稻数据中心。</span></div>{error && <div className="workspace-error"><AlertTriangle size={17} />{error}</div>}<button className="primary-button" disabled={running || !conditions.length || !draftConfirmed} onClick={run}>{running ? <LoaderCircle className="spin" size={16} /> : <Scale size={16} />}{running ? "正在检索与计算…" : "生成亲本推荐"}</button></section>}
     {result && <section className="workspace-card recommendation-results parent-step"><header><div><span>步骤 5</span><h3>查看结果并由育种专家确认</h3><p>{result.disclaimer}</p><p>候选 {result.candidate_count} 个，形成 {result.pair_count} 个组合；正式推荐 {result.formal_count}，待核实 {result.pending_count}，已排除 {result.excluded_count}。</p></div><div className="download-actions"><button onClick={() => download(`/api/research/parent-selection/runs/${result.run_id}/report.pdf`, "亲本推荐报告.pdf").catch((error) => onNotice?.(error.message))}><Download size={15} />PDF</button><button onClick={() => download(`/api/research/parent-selection/runs/${result.run_id}/result.csv`, "亲本推荐结果.csv").catch((error) => onNotice?.(error.message))}><Download size={15} />CSV</button></div></header>{result.selection_warning && <div className="workspace-warning"><AlertTriangle size={18} />{result.selection_warning}</div>}<h3>优先推荐</h3>{result.recommendations.length ? result.recommendations.map((item) => <PairCard key={`${item.female_parent.variety_id}-${item.male_parent.variety_id}`} item={item} runId={result.run_id} onNotice={onNotice} onReviewed={(key, value) => setReviews({ ...reviews, [key]: value })} />) : <p className="intelligence-empty">当前没有进入正式等级的组合。</p>}<details><summary>待核实组合（展示 {result.pending_verification.length}/{result.pending_count}）</summary>{result.pending_verification.map((item) => <PairCard key={`pending-${item.female_parent.variety_id}-${item.male_parent.variety_id}`} item={item} runId={result.run_id} onNotice={onNotice} onReviewed={(key, value) => setReviews({ ...reviews, [key]: value })} />)}</details><details><summary>已排除组合（展示 {result.excluded_combinations.length}/{result.excluded_count}）</summary>{result.excluded_combinations.map((item) => <PairCard key={`excluded-${item.female_parent.variety_id}-${item.male_parent.variety_id}`} item={item} runId={result.run_id} onNotice={onNotice} onReviewed={() => {}} />)}</details>{Object.keys(reviews).length > 0 && <div className="workspace-warning"><CheckCircle2 size={18} />已记录 {Object.keys(reviews).length} 个专家审核决定。</div>}</section>}

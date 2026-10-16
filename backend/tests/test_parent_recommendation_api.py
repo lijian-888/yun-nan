@@ -98,6 +98,37 @@ class ParentRecommendationApiTests(unittest.TestCase):
         self.assertEqual(draft.conditions[0].unit, "天")
         self.assertEqual(draft.conditions[0].code, "growth_duration_days-hard-every_parent-1")
 
+    def test_goal_parser_keeps_internal_codes_but_presents_chinese_explanations(self):
+        provider = AIProviderSettings("cherryin", "https://example.test/v1", "model", "secret", True)
+        returned = {
+            "mode": "conventional",
+            "target_region": "云南",
+            "summary": "限制 rice_type=indica 且 variety_kind=inbred。",
+            "conditions": [
+                {
+                    "code": "rice-type", "label": "籼型", "field": "rice_type",
+                    "operator": "eq", "value": "籼型", "kind": "hard",
+                },
+                {
+                    "code": "variety-kind", "label": "常规稻", "field": "variety_kind",
+                    "operator": "eq", "value": "常规稻", "kind": "hard",
+                },
+            ],
+            "unresolved_requirements": [],
+            "assumptions": ["按 rice_type=indica 和 variety_kind=inbred 执行"],
+        }
+        with patch("app.parent_goal_parser.model_json_request", new=AsyncMock(return_value=returned)):
+            draft = asyncio.run(parse_parent_goal(
+                provider=provider,
+                breeding_goal="面向云南的籼型常规稻。",
+                mode="conventional",
+                target_region="云南",
+            ))
+
+        self.assertEqual([item.value for item in draft.conditions], ["indica", "inbred"])
+        self.assertEqual(draft.summary, "限制 籼粳类型=籼型 且 品种类型=常规稻。")
+        self.assertEqual(draft.assumptions, ["按 籼粳类型=籼型 和 品种类型=常规稻 执行"])
+
     def test_slow_goal_parse_emits_progress_heartbeats_before_result(self):
         async def worker(progress):
             await progress("input_validation", "正在检查输入")
