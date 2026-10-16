@@ -1,0 +1,706 @@
+{
+  "catalog": {
+    "total": 1,
+    "with_pedigree": 1,
+    "direct_count": 1,
+    "verified_count": 0,
+    "groups": [{"code":"indica","name":"籼稻","count":1,"with_pedigree":1}],
+    "scope": "仅包含本次只读公开数据回归样本，不代表全库统计"
+  },
+  "graphs": {
+    "26175": {
+      "variety": {
+        "id": 26175,
+        "name": "00122－40－315",
+        "variety_type": "籼型常规水稻",
+        "parentage": "金23B/冈46B(♀) Ⅱ－32B/地谷B(♂)",
+        "breeder": "内江市农业科学院",
+        "source_id": "617035",
+        "source_url": "https://www.ricedata.cn/variety/varis/617035.htm"
+      },
+      "snapshot": {
+        "id": "direct:26175",
+        "fully_expanded": false,
+        "node_count": 32,
+        "edge_count": 34,
+        "crawled_at": "2026-10-14 23:51:32.455648+00:00",
+        "source_url": "https://www.ricedata.cn/variety/varis/617035.htm",
+        "mode": "direct_relations"
+      },
+      "nodes": [
+        {
+          "key": "v:617035:3c6805e93d48c719c0092a70",
+          "name": "00122－40－315",
+          "source_id": "617035",
+          "source_url": "https://www.ricedata.cn/variety/varis/617035.htm?617035",
+          "id": "v:617035:3c6805e93d48c719c0092a70",
+          "kind": "variety",
+          "variety_id": 26175,
+          "is_root": true,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 0
+        },
+        {
+          "key": "x:ee34e3abe20f4f3233acbaf0edf6200fb2b929ef",
+          "name": "金23B/冈46B",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=617035&fromid=",
+          "id": "x:ee34e3abe20f4f3233acbaf0edf6200fb2b929ef",
+          "kind": "cross",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 1
+        },
+        {
+          "key": "v:601132:26f979c6d2b4c2e386e66ddb",
+          "name": "金23B",
+          "source_id": "601132",
+          "source_url": "https://www.ricedata.cn/variety/varis/601132.htm?617035",
+          "id": "v:601132:26f979c6d2b4c2e386e66ddb",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 2
+        },
+        {
+          "key": "v:601130:497e82435c242ce173f862f8",
+          "name": "冈46B",
+          "source_id": "601130",
+          "source_url": "https://www.ricedata.cn/variety/varis/601130.htm?617035",
+          "id": "v:601130:497e82435c242ce173f862f8",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 2
+        },
+        {
+          "key": "x:9b0311f2e1eb58e83279b13060deb94835f7847d",
+          "name": "Ⅱ－32B/地谷B",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=617035&fromid=",
+          "id": "x:9b0311f2e1eb58e83279b13060deb94835f7847d",
+          "kind": "cross",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 1
+        },
+        {
+          "key": "v:601124:6d3e8bb278c8936e2b38e991",
+          "name": "Ⅱ－32B",
+          "source_id": "601124",
+          "source_url": "https://www.ricedata.cn/variety/varis/601124.htm?617035",
+          "id": "v:601124:6d3e8bb278c8936e2b38e991",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": false,
+          "recorded_depth": 2
+        },
+        {
+          "key": "v:607586:5225a77024ccb55eb179f303",
+          "name": "地谷B",
+          "source_id": "607586",
+          "source_url": "https://www.ricedata.cn/variety/varis/607586.htm?617035",
+          "id": "v:607586:5225a77024ccb55eb179f303",
+          "kind": "variety",
+          "variety_id": 35621,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 2
+        },
+        {
+          "key": "x:4d41584af8c2d949e6629c5718165a2e472ad9aa",
+          "name": "黄金3号",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=633426&fromid=",
+          "id": "x:4d41584af8c2d949e6629c5718165a2e472ad9aa",
+          "kind": "text",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 3
+        },
+        {
+          "key": "x:e93b23f0e42a3e033bf16a1d005089c39af0da98",
+          "name": "菲改B/软米M",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=633426&fromid=",
+          "id": "x:e93b23f0e42a3e033bf16a1d005089c39af0da98",
+          "kind": "cross",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 3
+        },
+        {
+          "key": "v:605083:a8c7ad52538368d51c4f8d0f",
+          "name": "菲改B",
+          "source_id": "605083",
+          "source_url": "https://www.ricedata.cn/variety/varis/605083.htm?633426",
+          "id": "v:605083:a8c7ad52538368d51c4f8d0f",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 4
+        },
+        {
+          "key": "x:527cd6df55214ffc224a658c538e04fdce0dc30a",
+          "name": "软米M",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=633426&fromid=",
+          "id": "x:527cd6df55214ffc224a658c538e04fdce0dc30a",
+          "kind": "text",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 4
+        },
+        {
+          "key": "x:0418cf80f3e59f2cfb287784d6f674ec57cea4d7",
+          "name": "二九矮7号/V41B",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=601130&fromid=",
+          "id": "x:0418cf80f3e59f2cfb287784d6f674ec57cea4d7",
+          "kind": "cross",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 3
+        },
+        {
+          "key": "v:607782:2ee9c11c9c2a9db007cac5d4",
+          "name": "二九矮7号",
+          "source_id": "607782",
+          "source_url": "https://www.ricedata.cn/variety/varis/607782.htm?601130",
+          "id": "v:607782:2ee9c11c9c2a9db007cac5d4",
+          "kind": "variety",
+          "variety_id": 35428,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 4
+        },
+        {
+          "key": "v:607771:ec275e9ba5e8c5ad53988748",
+          "name": "V41B",
+          "source_id": "607771",
+          "source_url": "https://www.ricedata.cn/variety/varis/607771.htm?601130",
+          "id": "v:607771:ec275e9ba5e8c5ad53988748",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 3
+        },
+        {
+          "key": "x:0fec91a6260741f71d83129c9204cd4f2101cffd",
+          "name": "珍汕97/雅矮早",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=601130&fromid=",
+          "id": "x:0fec91a6260741f71d83129c9204cd4f2101cffd",
+          "kind": "cross",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 3
+        },
+        {
+          "key": "v:600530:913b0b4124b1d3c477273268",
+          "name": "珍汕97",
+          "source_id": "600530",
+          "source_url": "https://www.ricedata.cn/variety/varis/600530.htm?601130",
+          "id": "v:600530:913b0b4124b1d3c477273268",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 4
+        },
+        {
+          "key": "x:b5f9a962eb90b5f30df7080701172cfc7d5b9dce",
+          "name": "雅矮早",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=601130&fromid=",
+          "id": "x:b5f9a962eb90b5f30df7080701172cfc7d5b9dce",
+          "kind": "text",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 4
+        },
+        {
+          "key": "v:607803:33501f66ea165f5a1adf2fe5",
+          "name": "谷农13",
+          "source_id": "607803",
+          "source_url": "https://www.ricedata.cn/variety/varis/607803.htm?607586",
+          "id": "v:607803:33501f66ea165f5a1adf2fe5",
+          "kind": "variety",
+          "variety_id": 35407,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 3
+        },
+        {
+          "key": "v:602349:2f9ceeb8270a5239600c6725",
+          "name": "广场矮5号",
+          "source_id": "602349",
+          "source_url": "https://www.ricedata.cn/variety/varis/602349.htm?633433",
+          "id": "v:602349:2f9ceeb8270a5239600c6725",
+          "kind": "variety",
+          "variety_id": 40850,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 5
+        },
+        {
+          "key": "v:607781:a31b4ae643d2ae464db133db",
+          "name": "泗沱2930",
+          "source_id": "607781",
+          "source_url": "https://www.ricedata.cn/variety/varis/607781.htm?633433",
+          "id": "v:607781:a31b4ae643d2ae464db133db",
+          "kind": "variety",
+          "variety_id": 35429,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 5
+        },
+        {
+          "key": "v:612966:40c82a1f68a647b83a49e93c",
+          "name": "珍汕98",
+          "source_id": "612966",
+          "source_url": "https://www.ricedata.cn/variety/varis/612966.htm?607771",
+          "id": "v:612966:40c82a1f68a647b83a49e93c",
+          "kind": "variety",
+          "variety_id": 30244,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 4
+        },
+        {
+          "key": "v:600623:a85c50544f186ebf9984a9b7",
+          "name": "珍珠矮11",
+          "source_id": "600623",
+          "source_url": "https://www.ricedata.cn/variety/varis/600623.htm?609419",
+          "id": "v:600623:a85c50544f186ebf9984a9b7",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 5
+        },
+        {
+          "key": "x:3f7372f5cbd8e3d97eb8a56a5f386f1e4dbfcafa",
+          "name": "汕矮选4号",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=609419&fromid=",
+          "id": "x:3f7372f5cbd8e3d97eb8a56a5f386f1e4dbfcafa",
+          "kind": "text",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 5
+        },
+        {
+          "key": "v:600624:a666ff8fe3b24daeb6170404",
+          "name": "矮仔占4号",
+          "source_id": "600624",
+          "source_url": "https://www.ricedata.cn/variety/varis/600624.htm?633501",
+          "id": "v:600624:a666ff8fe3b24daeb6170404",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 6
+        },
+        {
+          "key": "v:607613:fd60ad820f06503c3dac90bc",
+          "name": "广场13",
+          "source_id": "607613",
+          "source_url": "https://www.ricedata.cn/variety/varis/607613.htm?633501",
+          "id": "v:607613:fd60ad820f06503c3dac90bc",
+          "kind": "variety",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 6
+        },
+        {
+          "key": "x:5357af2f812a7664d41fe4cc24d4d850b88aef10",
+          "name": "汕矮选4号",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=633756&fromid=",
+          "id": "x:5357af2f812a7664d41fe4cc24d4d850b88aef10",
+          "kind": "text",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 5
+        },
+        {
+          "key": "v:607723:88043bcb2301a0c580e4eec8",
+          "name": "惠阳珍珠早",
+          "source_id": "607723",
+          "source_url": "https://www.ricedata.cn/variety/varis/607723.htm?609419",
+          "id": "v:607723:88043bcb2301a0c580e4eec8",
+          "kind": "variety",
+          "variety_id": 35487,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 6
+        },
+        {
+          "key": "v:607773:65126bc40036ac4d8b735e74",
+          "name": "矮仔占",
+          "source_id": "607773",
+          "source_url": "https://www.ricedata.cn/variety/varis/607773.htm?609419",
+          "id": "v:607773:65126bc40036ac4d8b735e74",
+          "kind": "variety",
+          "variety_id": 35437,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 7
+        },
+        {
+          "key": "v:607628:4f60997fc384f688bcedc447",
+          "name": "胜利籼",
+          "source_id": "607628",
+          "source_url": "https://www.ricedata.cn/variety/varis/607628.htm?609419",
+          "id": "v:607628:4f60997fc384f688bcedc447",
+          "kind": "variety",
+          "variety_id": 35582,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 7
+        },
+        {
+          "key": "v:604429:43e6df4206fad746f3cb4562",
+          "name": "南特号",
+          "source_id": "604429",
+          "source_url": "https://www.ricedata.cn/variety/varis/604429.htm?609419",
+          "id": "v:604429:43e6df4206fad746f3cb4562",
+          "kind": "variety",
+          "variety_id": 38770,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 7
+        },
+        {
+          "key": "x:b193094f67f1ea000264e676f914162be5eaafa4",
+          "name": "选占",
+          "source_id": null,
+          "source_url": "https://www.ricedata.cn/variety/pedigree.aspx?id=609419&fromid=",
+          "id": "x:b193094f67f1ea000264e676f914162be5eaafa4",
+          "kind": "text",
+          "variety_id": null,
+          "is_root": false,
+          "was_expandable": false,
+          "expansion_succeeded": true,
+          "recorded_depth": 8
+        },
+        {
+          "key": "v:607611:80c2dfee6e5315901e145841",
+          "name": "鄱阳早",
+          "source_id": "607611",
+          "source_url": "https://www.ricedata.cn/variety/varis/607611.htm?609419",
+          "id": "v:607611:80c2dfee6e5315901e145841",
+          "kind": "variety",
+          "variety_id": 35596,
+          "is_root": false,
+          "was_expandable": true,
+          "expansion_succeeded": true,
+          "recorded_depth": 8
+        }
+      ],
+      "edges": [
+        {
+          "id": "direct:0",
+          "child_id": "v:617035:3c6805e93d48c719c0092a70",
+          "parent_id": "x:ee34e3abe20f4f3233acbaf0edf6200fb2b929ef",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:1",
+          "child_id": "x:ee34e3abe20f4f3233acbaf0edf6200fb2b929ef",
+          "parent_id": "v:601132:26f979c6d2b4c2e386e66ddb",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:2",
+          "child_id": "x:ee34e3abe20f4f3233acbaf0edf6200fb2b929ef",
+          "parent_id": "v:601130:497e82435c242ce173f862f8",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:3",
+          "child_id": "v:617035:3c6805e93d48c719c0092a70",
+          "parent_id": "x:9b0311f2e1eb58e83279b13060deb94835f7847d",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:4",
+          "child_id": "x:9b0311f2e1eb58e83279b13060deb94835f7847d",
+          "parent_id": "v:601124:6d3e8bb278c8936e2b38e991",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:5",
+          "child_id": "x:9b0311f2e1eb58e83279b13060deb94835f7847d",
+          "parent_id": "v:607586:5225a77024ccb55eb179f303",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:6",
+          "child_id": "v:601132:26f979c6d2b4c2e386e66ddb",
+          "parent_id": "x:4d41584af8c2d949e6629c5718165a2e472ad9aa",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:7",
+          "child_id": "v:601132:26f979c6d2b4c2e386e66ddb",
+          "parent_id": "x:e93b23f0e42a3e033bf16a1d005089c39af0da98",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:8",
+          "child_id": "x:e93b23f0e42a3e033bf16a1d005089c39af0da98",
+          "parent_id": "v:605083:a8c7ad52538368d51c4f8d0f",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:9",
+          "child_id": "x:e93b23f0e42a3e033bf16a1d005089c39af0da98",
+          "parent_id": "x:527cd6df55214ffc224a658c538e04fdce0dc30a",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:10",
+          "child_id": "v:601130:497e82435c242ce173f862f8",
+          "parent_id": "x:0418cf80f3e59f2cfb287784d6f674ec57cea4d7",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:11",
+          "child_id": "x:0418cf80f3e59f2cfb287784d6f674ec57cea4d7",
+          "parent_id": "v:607782:2ee9c11c9c2a9db007cac5d4",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:12",
+          "child_id": "x:0418cf80f3e59f2cfb287784d6f674ec57cea4d7",
+          "parent_id": "v:607771:ec275e9ba5e8c5ad53988748",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:13",
+          "child_id": "v:601130:497e82435c242ce173f862f8",
+          "parent_id": "x:0fec91a6260741f71d83129c9204cd4f2101cffd",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:14",
+          "child_id": "x:0fec91a6260741f71d83129c9204cd4f2101cffd",
+          "parent_id": "v:600530:913b0b4124b1d3c477273268",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:15",
+          "child_id": "x:0fec91a6260741f71d83129c9204cd4f2101cffd",
+          "parent_id": "x:b5f9a962eb90b5f30df7080701172cfc7d5b9dce",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:16",
+          "child_id": "v:607586:5225a77024ccb55eb179f303",
+          "parent_id": "v:607771:ec275e9ba5e8c5ad53988748",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:17",
+          "child_id": "v:607586:5225a77024ccb55eb179f303",
+          "parent_id": "v:607803:33501f66ea165f5a1adf2fe5",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:18",
+          "child_id": "v:607782:2ee9c11c9c2a9db007cac5d4",
+          "parent_id": "v:602349:2f9ceeb8270a5239600c6725",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:19",
+          "child_id": "v:607782:2ee9c11c9c2a9db007cac5d4",
+          "parent_id": "v:607781:a31b4ae643d2ae464db133db",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:20",
+          "child_id": "v:607771:ec275e9ba5e8c5ad53988748",
+          "parent_id": "v:612966:40c82a1f68a647b83a49e93c",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:21",
+          "child_id": "v:600530:913b0b4124b1d3c477273268",
+          "parent_id": "v:600623:a85c50544f186ebf9984a9b7",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:22",
+          "child_id": "v:600530:913b0b4124b1d3c477273268",
+          "parent_id": "x:3f7372f5cbd8e3d97eb8a56a5f386f1e4dbfcafa",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:23",
+          "child_id": "v:602349:2f9ceeb8270a5239600c6725",
+          "parent_id": "v:600624:a666ff8fe3b24daeb6170404",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:24",
+          "child_id": "v:602349:2f9ceeb8270a5239600c6725",
+          "parent_id": "v:607613:fd60ad820f06503c3dac90bc",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:25",
+          "child_id": "v:612966:40c82a1f68a647b83a49e93c",
+          "parent_id": "v:600623:a85c50544f186ebf9984a9b7",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:26",
+          "child_id": "v:612966:40c82a1f68a647b83a49e93c",
+          "parent_id": "x:5357af2f812a7664d41fe4cc24d4d850b88aef10",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:27",
+          "child_id": "v:600623:a85c50544f186ebf9984a9b7",
+          "parent_id": "v:600624:a666ff8fe3b24daeb6170404",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:28",
+          "child_id": "v:600623:a85c50544f186ebf9984a9b7",
+          "parent_id": "v:607723:88043bcb2301a0c580e4eec8",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:29",
+          "child_id": "v:600624:a666ff8fe3b24daeb6170404",
+          "parent_id": "v:607773:65126bc40036ac4d8b735e74",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:30",
+          "child_id": "v:607613:fd60ad820f06503c3dac90bc",
+          "parent_id": "v:607628:4f60997fc384f688bcedc447",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:31",
+          "child_id": "v:607613:fd60ad820f06503c3dac90bc",
+          "parent_id": "v:604429:43e6df4206fad746f3cb4562",
+          "role": "parent",
+          "display_order": 1
+        },
+        {
+          "id": "direct:32",
+          "child_id": "v:607628:4f60997fc384f688bcedc447",
+          "parent_id": "x:b193094f67f1ea000264e676f914162be5eaafa4",
+          "role": "parent",
+          "display_order": 0
+        },
+        {
+          "id": "direct:33",
+          "child_id": "v:604429:43e6df4206fad746f3cb4562",
+          "parent_id": "v:607611:80c2dfee6e5315901e145841",
+          "role": "parent",
+          "display_order": 0
+        }
+      ],
+      "root_ids": [
+        "v:617035:3c6805e93d48c719c0092a70"
+      ],
+      "node_count": 32,
+      "edge_count": 34,
+      "unconnected_count": 0,
+      "warnings": [
+        "尚有 1 个材料的直接亲本待采集，当前不能称为完整祖先系谱。",
+        "来源系谱尚未完整采集，一键展开仅展示当前已收录的内容。",
+        "部分来源节点曾可展开但未成功采集，不把已收录内容称为完整祖先史。"
+      ],
+      "scope": "直接亲本关系来自原站证据；祖先由已采集关系在本地展开。未采集、名称缺失、关系冲突与回环不冒充完整系谱。",
+      "relation_mode": "direct_relations",
+      "missing_count": 1,
+      "blocked_relation_count": 0,
+      "source_limited_count": 0
+    }
+  }
+}

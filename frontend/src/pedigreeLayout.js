@@ -3,8 +3,9 @@ const key = id => String(id);
 export const NODE_WIDTH = 240;
 export const NODE_HEIGHT = 100;
 
-export function visiblePedigree(graph, expanded = new Set(), showAll = false) {
+export function visiblePedigree(graph, expanded = new Set(), showAll = false, maxAncestorDepth = Infinity) {
   if (!graph) return { nodes: [], edges: [] };
+  const depthLimit=showAll?Infinity:Math.max(0,Math.floor(maxAncestorDepth));
   const ids = new Set(graph.nodes.map(n => key(n.id)));
   const adjacency = new Map();
   graph.edges.forEach(edge => {
@@ -14,13 +15,16 @@ export function visiblePedigree(graph, expanded = new Set(), showAll = false) {
   });
   const visible = new Set(showAll ? ids : graph.root_ids.map(key));
   const pending = [...visible];
-  while (pending.length) {
-    const child = pending.pop();
+  const depths=new Map(pending.map(id=>[id,0]));
+  for(let index=0;index<pending.length;index++) {
+    const child = pending[index];
+    if(depths.get(child)>=depthLimit)continue;
     if (!expanded.has(child) && !showAll) continue;
-    (adjacency.get(child) || []).forEach(parent => { if (!visible.has(parent)) { visible.add(parent); pending.push(parent); } });
+    (adjacency.get(child) || []).forEach(parent => { if (!visible.has(parent)) { visible.add(parent);depths.set(parent,depths.get(child)+1); pending.push(parent); } });
   }
   return { nodes: graph.nodes.filter(n => visible.has(key(n.id))),
-    edges: graph.edges.filter(e => visible.has(key(e.child_id)) && visible.has(key(e.parent_id)) && (showAll || expanded.has(key(e.child_id)))) };
+    edges: graph.edges.filter(e => visible.has(key(e.child_id)) && visible.has(key(e.parent_id)) &&
+      (showAll || (expanded.has(key(e.child_id))&&depths.get(key(e.child_id))<depthLimit))),maxAncestorDepth:depthLimit };
 }
 
 export function pedigreeDepths(graph) {
@@ -58,25 +62,44 @@ export function layoutPedigree(graph, visible) {
     Number(a.display_order||0)-Number(b.display_order||0) || key(a.id).localeCompare(key(b.id),"en",{numeric:true})));
   const reachable = pedigreeDepths(graph);
   const rootIds = new Set(graph.root_ids.map(key));
+  const depthLimit=visible.maxAncestorDepth??Infinity,bounded=Number.isFinite(depthLimit);
+  // A shared material's canonical card must own its shallowest visible path.
+  // Otherwise a DFS can place it deep in one branch, then expand ancestors
+  // enabled by a different short path past the requested ring limit.
+  const owners=new Map(),canonicalIds=new Map();
+  if(bounded){
+    const queue=[];
+    for(const id of graph.root_ids.map(key))if(sources.has(id)&&!owners.has(id)){owners.set(id,null);queue.push({id,depth:0});}
+    for(let i=0;i<queue.length;i++){
+      const {id,depth}=queue[i];
+      if(depth>=depthLimit)continue;
+      for(const edge of adjacency.get(id)||[]){
+        const parent=key(edge.parent_id);
+        if(!owners.has(parent)){owners.set(parent,edge);queue.push({id:parent,depth:depth+1});}
+      }
+    }
+    [...owners.keys()].forEach((id,index)=>canonicalIds.set(id,`card-${index}`));
+  }
   const canonical = new Map(), active = new Set(), nodes = [], edges = [], roots = [];
   function card(sourceId, depth, disconnected, edge) {
     const existing = canonical.get(sourceId);
-    const node = {...sources.get(sourceId),sourceId,id:`card-${nodes.length}`,depth,
+    const isReference=bounded?(edge?owners.get(sourceId)!==edge:owners.get(sourceId)!==null):Boolean(existing);
+    const node = {...sources.get(sourceId),sourceId,id:bounded?(isReference?`reference-${nodes.length}`:canonicalIds.get(sourceId)):`card-${nodes.length}`,depth,
       disconnected,relation:edge?.role,is_root:!edge && rootIds.has(sourceId),
-      children:[],referenceTo:existing?.id,cycle:Boolean(existing&&active.has(sourceId))};
+      children:[],referenceTo:isReference?(bounded?canonicalIds.get(sourceId):existing.id):undefined,cycle:Boolean(isReference&&active.has(sourceId))};
     nodes.push(node);
-    if (!existing) canonical.set(sourceId,node);
+    if (!isReference) canonical.set(sourceId,node);
     return node;
   }
   // Iterative DFS also handles very deep source trees without call-stack overflow.
-  const rootOrder = [...graph.root_ids.map(key), ...visible.nodes.map(n=>key(n.id))];
+  const rootOrder = [...graph.root_ids.map(key), ...visible.nodes.filter(n=>!bounded||!reachable.has(key(n.id))).map(n=>key(n.id))];
   rootOrder.forEach(sourceId => {
     if (!sources.has(sourceId) || canonical.has(sourceId)) return;
     const root = card(sourceId,0,!reachable.has(sourceId)); roots.push(root);
     active.add(sourceId);
     const stack = [{node:root,index:0}];
     while (stack.length) {
-      const frame = stack[stack.length-1], outgoing = adjacency.get(frame.node.sourceId)||[];
+      const frame = stack[stack.length-1], outgoing = frame.node.depth>=depthLimit?[]:adjacency.get(frame.node.sourceId)||[];
       if (frame.index===outgoing.length) {active.delete(frame.node.sourceId);stack.pop();continue;}
       const edge = outgoing[frame.index++];
       const child = card(key(edge.parent_id),frame.node.depth+1,frame.node.disconnected,edge);

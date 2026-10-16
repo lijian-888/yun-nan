@@ -24,6 +24,7 @@ export default function PedigreeWorkspace() {
   const [selectedVariety,setSelectedVariety]=useState(null);
   const [graphBusy,setGraphBusy]=useState(false);
   const [expanded,setExpanded]=useState(new Set());
+  const [maxAncestorDepth,setMaxAncestorDepth]=useState(Infinity);
   const [showAll,setShowAll]=useState(false);
   const [viewport,setViewport]=useState({width:900,height:600});
   const [view,setView]=useState({scale:1,x:0,y:0});
@@ -42,7 +43,7 @@ export default function PedigreeWorkspace() {
   const detailBody=useRef(null);
   const backdropPressed=useRef(false);
   const titleId=useId();
-  const visible=useMemo(()=>visiblePedigree(graph,expanded,showAll),[graph,expanded,showAll]);
+  const visible=useMemo(()=>visiblePedigree(graph,expanded,showAll,maxAncestorDepth),[graph,expanded,showAll,maxAncestorDepth]);
   const layout=useMemo(()=>graph?layoutFanPedigree(graph,visible):selectedVariety?emptyLayout:catalogCircleLayout(catalog,group,list?.records||[]),[graph,visible,catalog,group,list,selectedVariety]);
   const parentIds=useMemo(()=>new Set((graph?.edges||[]).map(e=>String(e.child_id))),[graph]);
   const compactNames=useMemo(()=>graph?layout.nodes.flatMap((node,index)=>{
@@ -97,7 +98,7 @@ export default function PedigreeWorkspace() {
     setSelectedVariety(record); setGraph(null);setGraphBusy(true);setError("");setShowAll(false);
     try {
       const response=await request(`/api/research/pedigree/varieties/${record.id}/graph`,{signal:control.signal});
-      if(!control.signal.aborted){setGraph(response);setExpanded(expandLevels(response,2));}
+      if(!control.signal.aborted){setGraph(response);setExpanded(expandLevels(response,2));setMaxAncestorDepth(2);}
     } catch(e){if(!control.signal.aborted)setError(e.message);}
     finally {if(!control.signal.aborted)setGraphBusy(false);}
   }
@@ -108,7 +109,9 @@ export default function PedigreeWorkspace() {
   function chooseGroup(nextGroup) { directory(nextGroup); if(nextGroup===group)browse({keyword,group:nextGroup,only:onlyPedigree,page:1}); }
   function toggleNode(node) {
     setShowAll(false);
-    setExpanded(current=>{const next=new Set(current);next.has(node.sourceId)?next.delete(node.sourceId):next.add(node.sourceId);return next;});
+    const isOpen=node.children.length>0;
+    setExpanded(current=>{const next=new Set(current);isOpen?next.delete(node.sourceId):next.add(node.sourceId);return next;});
+    if(!isOpen)setMaxAncestorDepth(depth=>Number.isFinite(depth)?Math.max(depth,node.depth+1):depth);
   }
   function locateReference(node) {
     const target=layout.nodes.find(n=>n.id===node.referenceTo);
@@ -162,7 +165,7 @@ export default function PedigreeWorkspace() {
     <form className="pg-search" onSubmit={e=>{e.preventDefault();directory();browse();}}><input aria-label="搜索系谱品种" placeholder="搜索品种名或别名，例如田两优9号" maxLength={120} value={keyword} onChange={e=>setKeyword(e.target.value)}/><select aria-label="系谱品种分组" value={group} onChange={e=>chooseGroup(e.target.value)}><option value="">全部类型</option>{catalog?.groups.map(g=><option key={g.code} value={g.code}>{g.name}（{number(g.count)}）</option>)}</select><label><input type="checkbox" checked={onlyPedigree} onChange={e=>{const only=e.target.checked;setOnlyPedigree(only);directory();browse({keyword,group,only,page:1});}}/>仅有系谱</label><button className="primary-button" type="submit" disabled={listBusy}><Search size={16}/>检索</button></form>
     {error&&<p className="pg-error" role="alert">{error}</p>}
     <div className="pg-layout"><aside className="pg-list"><div className="pg-list-heading"><strong>{list?`匹配 ${number(list.total)} 个品种`:"品种目录"}</strong>{listBusy&&<LoaderCircle className="spin" size={15}/>}</div><p>选择品种查看系谱。目录分组不是亲缘关系。</p><div className="pg-list-records">{list?.records.map(record=><button type="button" key={record.id} aria-pressed={selectedVariety?.id===record.id} onClick={()=>selectVariety(record)}><strong>{record.name}</strong><span>{record.variety_type||"类型未记载"} · {record.edge_count?`${record.node_count}个已存节点` : (record.pedigree_status==="pending_verification"?"系谱待原站校验":"原站未展示亲本")}</span></button>)}{!listBusy&&list&&!list.records.length&&<p>未找到符合条件的品种，可减少条件或改用别名检索。</p>}</div><div className="pg-list-pages"><button disabled={!list||list.page<=1||listBusy} onClick={()=>browse({keyword:list.keyword,group:list.group,only:list.only,page:list.page-1})}>上一页</button><span>{list?.page||1} / {Math.max(1,Math.ceil((list?.total||0)/(list?.page_size||12)))}</span><button disabled={!list?.has_more||listBusy} onClick={()=>browse({keyword:list.keyword,group:list.group,only:list.only,page:list.page+1})}>下一页</button></div></aside>
-      <div className="pg-canvas-panel"><div className="pg-toolbar"><div><strong>{selectedVariety?.name||"品种库概览"}</strong><span>{graph?`扇形祖先谱 · ${visible.nodes.length} / ${graph.node_count} 个来源节点，${visible.edges.length} 条来源关系；${layout.referenceCount} 个引用节点（不重复计数）` : "点击四大分类，环绕浏览品种；点击品种查看扇形祖先谱"}</span></div><div className="pg-actions">{selectedVariety&&<button className="secondary-button" onClick={()=>{drag.current=null;openDetail({name:selectedVariety.name,kind:"variety",variety_id:selectedVariety.id,source_url:graph?.variety.source_url});}}>品种档案</button>}{graph&&<><button className="primary-button" onClick={()=>{setExpanded(new Set(graph.nodes.map(n=>String(n.id))));setShowAll(true);}}>一键展开全部</button><button className="secondary-button" onClick={()=>{setExpanded(expandLevels(graph,5));setShowAll(false);}}>展开5层</button><button className="secondary-button" onClick={()=>{setExpanded(new Set());setShowAll(false);}}>收起全部</button></>}<button className="secondary-button" onClick={()=>directory("")} disabled={!selectedVariety&&!group}><ArrowLeft size={14}/>目录</button></div></div>
+      <div className="pg-canvas-panel"><div className="pg-toolbar"><div><strong>{selectedVariety?.name||"品种库概览"}</strong><span>{graph?`扇形祖先谱 · ${visible.nodes.length} / ${graph.node_count} 个来源节点，${visible.edges.length} 条来源关系；${layout.referenceCount} 个引用节点（不重复计数）` : "点击四大分类，环绕浏览品种；点击品种查看扇形祖先谱"}</span></div><div className="pg-actions">{selectedVariety&&<button className="secondary-button" onClick={()=>{drag.current=null;openDetail({name:selectedVariety.name,kind:"variety",variety_id:selectedVariety.id,source_url:graph?.variety.source_url});}}>品种档案</button>}{graph&&<><button className="primary-button" onClick={()=>{setExpanded(new Set(graph.nodes.map(n=>String(n.id))));setMaxAncestorDepth(Infinity);setShowAll(true);}}>一键展开全部</button><button className="secondary-button" title="显示最多五层祖先，不含中心品种；可用节点＋继续展开" onClick={()=>{setExpanded(expandLevels(graph,5));setMaxAncestorDepth(5);setShowAll(false);}}>展开5层</button><button className="secondary-button" onClick={()=>{setExpanded(new Set());setMaxAncestorDepth(0);setShowAll(false);}}>收起全部</button></>}<button className="secondary-button" onClick={()=>directory("")} disabled={!selectedVariety&&!group}><ArrowLeft size={14}/>目录</button></div></div>
         {graph?.warnings.length>0&&<div className="pg-warnings">{graph.warnings.map((warning,index)=><p key={index}>{warning}</p>)}</div>}
         <div className="pg-stage" ref={stage} aria-busy={graphBusy}>
           {graphBusy&&<div className="pg-loading" role="status"><LoaderCircle className="spin" size={22}/>正在读取服务器系谱…</div>}
@@ -170,13 +173,13 @@ export default function PedigreeWorkspace() {
           <div ref={scroll} className={`pg-scroll${graph?" pg-scroll-tree":""}`} data-tree={Boolean(graph)} tabIndex={graph?0:undefined} aria-label={graph?"系谱画布，可横向和纵向滚动":undefined}>
           <svg ref={svg} width={graph?Math.max(viewport.width,layout.width*view.scale):"100%"} height={graph?Math.max(viewport.height,layout.height*view.scale):"100%"} viewBox={graph?undefined:`0 0 ${viewport.width} ${viewport.height}`} role="group" aria-label={graph?`${graph.variety.name}的亲本祖先系谱图`:"品种目录分类图（不是亲缘关系）"} onPointerDown={e=>{if(e.button!==0)return;drag.current={x:e.clientX,y:e.clientY,moved:false};if(e.target===e.currentTarget)e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!drag.current||!e.buttons)return;const dx=e.clientX-drag.current.x,dy=e.clientY-drag.current.y;if(Math.abs(dx)+Math.abs(dy)>2)drag.current.moved=true;if(drag.current.moved&&!e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.setPointerCapture(e.pointerId);if(drag.current.moved){if(graph){scroll.current.scrollLeft-=dx;scroll.current.scrollTop-=dy;}else setView(v=>({...v,x:v.x+dx,y:v.y+dy}));}drag.current.x=e.clientX;drag.current.y=e.clientY;}} onPointerUp={e=>{if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onPointerCancel={()=>{drag.current=null;}}>
             <g className="pg-world" transform={graph?`scale(${view.scale})`:`translate(${view.x},${view.y}) scale(${view.scale})`}>
-              {graph?<PedigreeFan layout={layout} scale={view.scale} expanded={expanded} parentIds={parentIds} highlight={highlight} onNode={nodeAction} onToggle={node=>{if(!drag.current?.moved)toggleNode(node);}} onInspect={setInspection}/>:<>
+              {graph?<PedigreeFan layout={layout} scale={view.scale} parentIds={parentIds} highlight={highlight} onNode={nodeAction} onToggle={node=>{if(!drag.current?.moved)toggleNode(node);}} onInspect={setInspection}/>:<>
                 {layout.edges.map(edge=><path key={edge.id} d={`M${edge.from.x},${edge.from.y} L${edge.to.x},${edge.to.y}`} fill="none" stroke="#bdd0c3" strokeWidth="1.3"/>)}
                 {layout.nodes.map(node=><g key={node.id} transform={`translate(${node.x},${node.y})`} role="button" tabIndex={0} aria-label={`${node.name}，打开`} onClick={()=>nodeAction(node)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();nodeAction(node,true);}}} className="pg-catalog-node"><title>{node.name} · {node.subtitle}</title><circle r={node.radius} fill={node.is_root?'#195f4b':'#b77732'} stroke="#fff" strokeWidth="3"/>{node.kind==='catalog-variety'?<><text textAnchor="middle" y="5" fill="#fff" fontSize={Math.max(13,13/view.scale)}>{node.name.slice(0,2)}</text><text textAnchor="middle" y={node.radius+18/view.scale} fill="#345b47" fontSize={Math.max(12,12/view.scale)}>{node.name.length>8?node.name.slice(0,7)+'…':node.name}</text></>:<text textAnchor="middle" fill="#fff" fontSize={Math.max(13,13/view.scale)}>{(node.name.length>7?[node.name.slice(0,6),node.name.slice(6)]:[node.name]).map((line,i,lines)=><tspan key={i} x="0" y={(i-(lines.length-1)/2)*16/view.scale+5/view.scale}>{line}</tspan>)}</text>}<text textAnchor="middle" y={node.radius+(node.kind==='catalog-variety'?36:20)/view.scale} fill="#577866" fontSize={Math.max(11,11/view.scale)}>{node.subtitle}</text></g>)}
               </>}
             </g>
           </svg></div><div className="pg-zoom"><button title="放大" aria-label="放大图谱" onClick={()=>zoom(1.25)}><Plus size={17}/></button><button className="pg-scale-reset" title="恢复100%可读尺寸" aria-label="恢复100%可读尺寸" onClick={()=>zoom(1/view.scale)}>{Math.round(view.scale*100)}%</button><button title="缩小" aria-label="缩小图谱" onClick={()=>zoom(.8)}><Minus size={17}/></button><button title="适应窗口（概览）" aria-label="图谱适应窗口" onClick={()=>{setView(graph?{scale:fitView(layout,viewport).scale,x:0,y:0}:fitView(layout,viewport));scroll.current?.scrollTo({top:0,left:0});}}><Maximize size={17}/></button><button title="导出当前可见图谱" aria-label="导出当前可见图谱" onClick={downloadGraph}><Download size={17}/></button></div>
-          <div className="pg-help">{graph?"内圈：亲本；外圈：更早祖先 · 放大查看密集区 · 紫色 ↗ 定位共同祖先":"滚轮缩放 · 拖动平移 · 目录连线仅表示分类包含"}</div>
+          <div className="pg-help">{graph?`${Number.isFinite(maxAncestorDepth)?`当前最多${maxAncestorDepth}层祖先（不含中心品种） · `:''}内圈：亲本；外圈：更早祖先 · 节点＋可继续展开 · 紫色 ↗ 定位共同祖先`:"滚轮缩放 · 拖动平移 · 目录连线仅表示分类包含"}</div>
         </div>
         {graph&&<div className="pg-inspection">{inspection||'悬停或聚焦扇区查看完整名称与关系；点击查看资料。'}</div>}
         {compactNames.length>0&&<div className="pg-compact-names"><strong>窄扇区完整名称</strong><p>图中数字对应下列名称；放大可直接查看扇区文字。</p><div>{compactNames.map(({node,index,numbered})=><button key={node.id} onClick={()=>nodeAction(node,true)}>{numbered?`${index}. `:''}{node.name||'名称未记载'}{node.referenceTo?' ↗':''}</button>)}</div></div>}

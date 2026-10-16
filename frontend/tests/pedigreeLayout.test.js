@@ -35,6 +35,54 @@ test("five-level expansion shows five ancestor levels but leaves deeper ancestor
   assert.deepEqual(visible.nodes.map(n=>n.id),[0,1,2,3,4,5]);
   assert.deepEqual(visible.edges.map(e=>e.id),[0,1,2,3,4]);
 });
+
+const overflowFixture=JSON.parse(readFileSync(new URL('./fixtures/pedigree-five-level-overflow.json',import.meta.url),'utf8'));
+
+test("00122-40-315 five-level preset never renders an ancestor or reference in a sixth ring",()=>{
+  const source=Object.values(overflowFixture.graphs)[0];
+  const visible=visiblePedigree(source,expandLevels(source,5),false,5);
+  const layout=layoutFanPedigree(source,visible);
+  assert.ok(layout.nodes.every(n=>n.depth<=5),JSON.stringify(layout.nodes.filter(n=>n.depth>5).map(n=>({name:n.name,depth:n.depth}))));
+  assert.equal(layout.nodes.filter(n=>!n.referenceTo).length,visible.nodes.length,'shallow shared ancestry must not disappear');
+  assert.deepEqual(layout.edges.map(e=>e.id).sort(),visible.edges.map(e=>e.id).sort());
+  for(const n of layout.nodes.filter(n=>n.referenceTo))assert.ok(layout.nodes.some(t=>t.id===n.referenceTo&&!t.referenceTo));
+});
+
+test("shared ancestor shortcut cannot reopen a deeper occurrence past the level cap",()=>{
+  const source={root_ids:[0],nodes:Array.from({length:7},(_,id)=>({id,name:`材料${id}`})),
+    edges:[...Array.from({length:6},(_,id)=>({id,child_id:id,parent_id:id+1})),{id:6,child_id:0,parent_id:4}]};
+  const visible=visiblePedigree(source,expandLevels(source,5),false,5);
+  const layout=layoutFanPedigree(source,visible);
+  assert.ok(layout.nodes.every(n=>n.depth<=5));
+  assert.ok(layout.nodes.some(n=>n.sourceId==='6'),'valid shallow path to the ancestor must remain');
+  assert.ok(layout.nodes.find(n=>n.sourceId==='4'&&!n.referenceTo).depth===1);
+});
+
+test("depth caps include the root at zero, retain bounded relations, and never constrain all mode",()=>{
+  const source=Object.values(overflowFixture.graphs)[0];
+  for(const limit of [0,1,2,3,5,6]){
+    const visible=visiblePedigree(source,expandLevels(source,limit),false,limit);
+    const layout=layoutFanPedigree(source,visible);
+    assert.ok(layout.nodes.every(n=>n.depth<=limit));
+    assert.equal(layout.nodes.filter(n=>!n.referenceTo).length,visible.nodes.length);
+    assert.deepEqual(layout.edges.map(e=>e.id).sort(),visible.edges.map(e=>e.id).sort());
+  }
+  const all=layoutFanPedigree(source,visiblePedigree(source,new Set(),true,5));
+  assert.equal(all.nodes.filter(n=>!n.referenceTo).length,source.nodes.length);
+  assert.deepEqual(all.edges.map(e=>e.id).sort(),source.edges.map(e=>e.id).sort());
+  assert.ok(all.nodes.some(n=>n.depth>5));
+});
+
+test("bounded cyclic pedigrees terminate with valid reference targets",()=>{
+  const source={...graph,edges:[...graph.edges,{id:5,child_id:4,parent_id:1}]};
+  const visible=visiblePedigree(source,expandLevels(source,5),false,5);
+  const layout=layoutFanPedigree(source,visible);
+  assert.equal(layout.nodes.filter(n=>n.cycle).length,1);
+  assert.equal(layout.edges.length,visible.edges.length);
+  for(const node of layout.nodes.filter(n=>n.referenceTo)){
+    assert.ok(layout.nodes.some(target=>target.id===node.referenceTo&&!target.referenceTo));
+  }
+});
 test("fit and zoom remain bounded and keep anchor fixed",()=>{
   const view=fitView({width:3000,height:4000},{width:1000,height:600});
   assert.ok(view.scale>=.08&&view.scale<=1.15);
