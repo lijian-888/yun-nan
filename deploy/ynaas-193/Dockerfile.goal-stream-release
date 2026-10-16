@@ -5,3 +5,4 @@ FROM ${BASE_API_IMAGE}
 # pedigree fixes while replacing only the goal-interpretation boundary.
 COPY backend/app/parent_goal_parser.py /app/app/parent_goal_parser.py
 COPY backend/app/parent_recommendation_api.py /app/app/parent_recommendation_api.py
+COPY backend/app/parent_recommendation_engine.py /app/app/parent_recommendation_engine.py

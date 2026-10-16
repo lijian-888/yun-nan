@@ -124,6 +124,24 @@ class ParentRecommendationEngineTests(unittest.TestCase):
         self.assertEqual(item["kinship"]["level"], "unknown")
         self.assertTrue(any("不能据此声称无亲缘" in reason for reason in item["kinship"]["reasons"]))
 
+    def test_identical_pedigree_warnings_from_both_parents_are_reported_once(self):
+        warning = "国家水稻数据中心尚无已核验系谱快照。"
+        left = candidate(1, "甲", complete=0)
+        right = candidate(2, "乙", complete=0)
+        left = CandidateProfile(**{
+            **left.__dict__, "pedigree": PedigreeProfile(warnings=(warning,)),
+        })
+        right = CandidateProfile(**{
+            **right.__dict__, "pedigree": PedigreeProfile(warnings=(warning,)),
+        })
+
+        result = self.engine.recommend(
+            request(self.yield_preference), MemoryRiceDataRepository([left, right]),
+        )
+        item = (result["recommendations"] + result["pending_verification"])[0]
+
+        self.assertEqual(item["kinship"]["reasons"].count(warning), 1)
+
     def test_hybrid_roles_are_directional_and_unknown_roles_are_pending(self):
         sterile = candidate(1, "三系不育系", role=ParentRole.STERILE_THREE_LINE)
         restorer = candidate(2, "恢复系", role=ParentRole.RESTORER)

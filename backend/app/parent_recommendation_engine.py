@@ -356,7 +356,7 @@ def assess_kinship(
             (f"{distance}代范围内发现较远共同祖先{nearest['name']}。",), tuple(common), complete,
         )
     if not complete:
-        warnings = left.warnings + right.warnings
+        warnings = tuple(dict.fromkeys((*left.warnings, *right.warnings)))
         return KinshipOutcome(
             KinshipLevel.UNKNOWN,
             (f"系谱未完整覆盖双方{policy.depth}代祖先，不能据此声称无亲缘。", *warnings), (), False,
