@@ -38,19 +38,22 @@ def catalog(session):
         SELECT {GROUP_SQL} AS code,count(*) AS count,
           count(*) FILTER(WHERE COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges'),0)>0) AS with_pedigree,
           count(*) FILTER(WHERE s.pedigree_snapshot_id IS NOT NULL) AS verified,
-          count(*) FILTER(WHERE f.fact_key IS NOT NULL) AS direct_collected
+          count(*) FILTER(WHERE f.status='verified_direct') AS direct_collected,
+          count(*) FILTER(WHERE f.status='verified_partial') AS source_limited
         FROM agent_query.ricedata__rice_variety v LEFT JOIN latest s USING(variety_id)
-        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_job j ON j.source_id=v.source_variety_id AND j.status='complete'
-        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_fact f ON f.fact_key=j.root_key AND f.status='verified_direct'
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_job j ON j.source_id=v.source_variety_id AND j.status IN ('complete','source_limited')
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_fact f ON f.fact_key=j.root_key AND f.status IN ('verified_direct','verified_partial')
         GROUP BY 1""")
     by_code = {row["code"]: row for row in groups}
     groups = [{"code": code, "name": name, "count": by_code.get(code, {}).get("count", 0),
                "with_pedigree": by_code.get(code, {}).get("with_pedigree", 0),
                "verified": by_code.get(code, {}).get("verified",0),
-               "direct_collected":by_code.get(code,{}).get("direct_collected",0)} for code, name in GROUP_NAMES.items()]
+               "direct_collected":by_code.get(code,{}).get("direct_collected",0),
+               "source_limited":by_code.get(code,{}).get("source_limited",0)} for code, name in GROUP_NAMES.items()]
     return {"total": sum(g["count"] for g in groups), "with_pedigree": sum(g["with_pedigree"] for g in groups),
             "verified_count":sum(g["verified"] for g in groups),
             "direct_count":sum(g['direct_collected'] for g in groups),
+            "source_limited_count":sum(g['source_limited'] for g in groups),
             "groups": groups, "source": "国家水稻数据中心", "scope": "目录分组不是亲缘关系；直接亲本已取证不等于全部祖先已完成。"}
 
 
@@ -64,14 +67,14 @@ def list_varieties(session, keyword="", group="", only_pedigree=False, page=1, p
         where += " AND COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges'),0)>0"
     relation = f"WITH latest AS ({LATEST_SQL})"
     join = """FROM agent_query.ricedata__rice_variety v LEFT JOIN latest s USING(variety_id)
-        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_job j ON j.source_id=v.source_variety_id AND j.status='complete'
-        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_fact f ON f.fact_key=j.root_key AND f.status='verified_direct'"""
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_job j ON j.source_id=v.source_variety_id AND j.status IN ('complete','source_limited')
+        LEFT JOIN agent_query.ricedata__rice_pedigree_direct_fact f ON f.fact_key=j.root_key AND f.status IN ('verified_direct','verified_partial')"""
     total = session.scalar(text(f"{relation} SELECT count(*) {join} WHERE {where}"), params)
     records = rows(session, f"""{relation} SELECT v.variety_id AS id,v.variety_name AS name,v.variety_type,
         v.source_variety_id AS source_id,COALESCE(v.trial_names,ARRAY[]::text[]) || COALESCE(v.former_names,ARRAY[]::text[]) AS aliases,
         COALESCE(s.node_count,jsonb_array_length(f.fragment->'nodes')) AS node_count,
         COALESCE(s.edge_count,jsonb_array_length(f.fragment->'edges')) AS edge_count,s.max_depth,s.fully_expanded,
-        CASE WHEN s.pedigree_snapshot_id IS NOT NULL THEN 'verified' WHEN f.fact_key IS NOT NULL THEN 'direct_collected' ELSE 'pending_verification' END AS pedigree_status
+        CASE WHEN s.pedigree_snapshot_id IS NOT NULL THEN 'verified' WHEN f.status='verified_partial' THEN 'source_limited' WHEN f.fact_key IS NOT NULL THEN 'direct_collected' ELSE 'pending_verification' END AS pedigree_status
         {join} WHERE {where}
         ORDER BY CASE WHEN lower(v.variety_name)=lower(:exact) THEN 0 ELSE 1 END,v.variety_name,v.variety_id
         LIMIT :limit OFFSET :offset""", params)
@@ -157,6 +160,7 @@ def pedigree_graph(session, variety_id):
             result['warnings']=direct['warnings']+result['warnings']
             result['scope']='直接亲本关系来自原站证据；祖先由已采集关系在本地展开。未采集、名称缺失、关系冲突与回环不冒充完整系谱。'
             result['relation_mode']='direct_relations';result['missing_count']=direct['missing_count'];result['blocked_relation_count']=direct['blocked_relation_count']
+            result['source_limited_count']=direct['source_limited_count']
             return result
         result=serialize_graph(varieties[0], None, [], [])
         result["warnings"]=["该品种系谱正在按原站重新完整采集和校验，暂不展示未经核验的旧关系；不表示没有亲本。"]

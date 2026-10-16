@@ -19,6 +19,18 @@ class DirectTests(unittest.TestCase):
     def test_unknown_pending_is_not_accepted(self):
         self.assertIsNone(fragment([node('根','1'),node('组合',None,0,True)]))
 
+    def test_source_limited_keeps_named_branch_without_claiming_complete(self):
+        data=[node('根','1'),node('A/B',None,0),node('A',None,1),node('B',None,1),node('h9418',None,0,True)]
+        f=fragment(data,allow_source_limited=True)
+        self.assertEqual([n['name'] for n in f['nodes']],['根','A/B','A','B','h9418'])
+        g=assemble(f['root'],{f['root']:dict(fragment=f,status='verified_partial')})
+        self.assertEqual(len(g['edges']),4)
+        self.assertEqual(g['source_limited_count'],1)
+        self.assertFalse(g['fully_expanded'])
+        leaf=next(n for n in g['nodes'] if n['name']=='h9418')
+        self.assertFalse(leaf['expansion_succeeded'])
+        self.assertIn('原站展开受限',g['warnings'][0])
+
     def test_no_name_based_merge_and_duplicate_positions_survive(self):
         f=fragment([node('根','1'),node('同名',None,0),node('同名',None,0)])
         self.assertNotEqual(f['nodes'][1]['key'],f['nodes'][2]['key'])

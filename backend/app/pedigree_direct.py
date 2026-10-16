@@ -10,7 +10,7 @@ def material_key(source_id,name):
     return 'v:'+str(source_id)+':'+hashlib.sha256(name.encode()).hexdigest()[:24]
 
 
-def fragment(records,index=0):
+def fragment(records,index=0,*,allow_source_limited=False):
     root=records[index]
     if not root['source_id'] or root['pending_expansion']:
         return None
@@ -25,10 +25,12 @@ def fragment(records,index=0):
             key=material_key(node['source_id'],node['name'])
             references.append(key)
         else:
-            if node['pending_expansion']:
+            if node['pending_expansion'] and not allow_source_limited:
                 raise ValueError('Unnamed intermediate branch is not expanded')
             key=owner if i==index else 'x:'+hashlib.sha256(f'{owner}|{len(nodes)}|{node["name"]}'.encode()).hexdigest()[:40]
         nodes.append(dict(key=key,name=node['name'],source_id=node['source_id'],source_url=node['url']))
+        if node['pending_expansion'] and not node['source_id']:
+            nodes[-1]['source_limited']=True
         if parent is not None:edges.append(dict(child=parent,parent=key,position=position))
         if i==index or not node['source_id']:
             for pos,child in enumerate(children[i]):visit(child,key,pos)
@@ -39,13 +41,13 @@ def fragment(records,index=0):
 
 def semantic_signature(value):
     # URLs and disclosure/expand buttons are not biological relationships.
-    payload=dict(nodes=[{k:n[k] for k in ('key','name','source_id')} for n in value['nodes']],edges=value['edges'])
+    payload=dict(nodes=[dict({k:n[k] for k in ('key','name','source_id')},**({'source_limited':True} if n.get('source_limited') else {})) for n in value['nodes']],edges=value['edges'])
     import json
     return hashlib.sha256(json.dumps(payload,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
 
 
 def assemble(root,facts,limit=5000):
-    nodes={};edges=[];missing=set();conflicts=set();expanded=set();queue=deque([root])
+    nodes={};edges=[];missing=set();conflicts=set();limited=set();expanded=set();queue=deque([root])
     while queue:
         key=queue.popleft()
         if key in expanded:continue
@@ -53,7 +55,7 @@ def assemble(root,facts,limit=5000):
         fact=facts.get(key)
         if not fact:
             missing.add(key);continue
-        if fact.get('status')!='verified_direct':
+        if fact.get('status') not in ('verified_direct','verified_partial'):
             conflicts.add(key)
             if key==root and fact.get('fragment',{}).get('nodes'):
                 item=fact['fragment']['nodes'][0]
@@ -67,6 +69,9 @@ def assemble(root,facts,limit=5000):
             node=dict(item)
             node.update(id=node['key'],kind='variety' if node['source_id'] else 'cross' if '/' in node['name'] else 'text',
                         variety_id=None,is_root=node['key']==root,was_expandable=bool(node['source_id']),expansion_succeeded=True,recorded_depth=0)
+            if node.get('source_limited'):
+                limited.add(node['key'])
+                node.update(was_expandable=True,expansion_succeeded=False,source_status='source_expansion_limited')
             if not node['name'].strip() or node['name'].strip() in ('0','?','？'):
                 node['raw_name']=node['name'];node['name']='亲本名称待核实';node['kind']='unknown';conflicts.add(node['key'])
             nodes.setdefault(node['key'],node)
@@ -95,6 +100,7 @@ def assemble(root,facts,limit=5000):
         blocked.update(i for i,e in enumerate(edges) if e['child_id'] in cycle_nodes and e['parent_id'] in cycle_nodes)
     visible=[e for i,e in enumerate(edges) if i not in blocked]
     warnings=[]
+    if limited:warnings.append(f'原站展开受限：{len(limited)} 个具名分支保留已采集的最大展开状态，不再点击会折叠其他分支的按钮；名称及已显示关系保留，不代表没有更早祖先。')
     if missing:warnings.append(f'尚有 {len(missing)} 个材料的直接亲本待采集，当前不能称为完整祖先系谱。')
     if conflicts:warnings.append(f'存在 {len(conflicts)} 个来源冲突或名称待核实节点，未强行续接。')
     if blocked:warnings.append(f'原站存在祖先回环，{len(blocked)} 条回环关系未作为有效亲缘关系展示；原始证据已保留。')
@@ -110,18 +116,18 @@ def assemble(root,facts,limit=5000):
             if parent not in depths:depths[parent]=depths[key]+1;pending.append(parent)
     for key,node in nodes.items():node['recorded_depth']=depths.get(key,0)
     return dict(nodes=list(nodes.values()),edges=visible,root_ids=[root] if root in nodes else [],
-                warnings=warnings,fully_expanded=not(missing or conflicts or blocked),
+                warnings=warnings,fully_expanded=not(missing or conflicts or blocked or limited),source_limited_count=len(limited),
                 missing_count=len(missing),conflict_count=len(conflicts),blocked_relation_count=len(blocked))
 
 
 def load_graph(session,source_id):
-    job=session.execute(text('SELECT root_key,collected_at FROM agent_query.ricedata__rice_pedigree_direct_job WHERE source_id=:id AND status=\'complete\''),{'id':str(source_id)}).mappings().first()
+    job=session.execute(text("SELECT root_key,collected_at FROM agent_query.ricedata__rice_pedigree_direct_job WHERE source_id=:id AND status IN ('complete','source_limited')"),{'id':str(source_id)}).mappings().first()
     if not job:return None
     records=session.execute(text('''WITH RECURSIVE dependencies(key) AS (
         SELECT CAST(:root AS text) UNION
         SELECT jsonb_array_elements_text(f.fragment->'references')
         FROM dependencies d JOIN agent_query.ricedata__rice_pedigree_direct_fact f ON f.fact_key=d.key
-        WHERE f.status='verified_direct'
+        WHERE f.status IN ('verified_direct','verified_partial')
     ) SELECT f.fact_key,f.fragment,f.status FROM agent_query.ricedata__rice_pedigree_direct_fact f
     JOIN dependencies d ON d.key=f.fact_key LIMIT 5001'''),{'root':job['root_key']}).mappings().all()
     if len(records)>5000:raise ValueError('Source dependencies exceed safe graph bound')

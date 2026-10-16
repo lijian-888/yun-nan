@@ -7,17 +7,17 @@ from refresh_ricedata_pedigree import collect,parse_source,CollectionDeferred,So
 from rebuild_ricedata_pedigrees import pace_requests,write_json,load_json
 
 
-def store(conn,value,url,digest):
+def store(conn,value,url,digest,status='verified_direct'):
     root=value['nodes'][0];signature=semantic_signature(value)
     evidence=json.dumps([dict(url=url,sha256=digest)])
     conn.execute(text('''INSERT INTO ricedata.rice_pedigree_direct_fact
-        (fact_key,source_id,material_name,fragment,signature,evidence)
-        VALUES (:key,:source,:name,CAST(:fragment AS jsonb),:signature,CAST(:evidence AS jsonb))
+        (fact_key,source_id,material_name,fragment,signature,evidence,status)
+        VALUES (:key,:source,:name,CAST(:fragment AS jsonb),:signature,CAST(:evidence AS jsonb),:status)
         ON CONFLICT(fact_key) DO UPDATE SET
         status=CASE WHEN rice_pedigree_direct_fact.signature=EXCLUDED.signature THEN rice_pedigree_direct_fact.status ELSE 'conflict' END,
         conflict_evidence=CASE WHEN rice_pedigree_direct_fact.signature=EXCLUDED.signature THEN rice_pedigree_direct_fact.conflict_evidence
           ELSE rice_pedigree_direct_fact.conflict_evidence || jsonb_build_array(jsonb_build_object('fragment',EXCLUDED.fragment,'evidence',EXCLUDED.evidence)) END
-    '''),dict(key=value['root'],source=root['source_id'],name=root['name'],fragment=json.dumps(value,ensure_ascii=False),signature=signature,evidence=evidence))
+    '''),dict(key=value['root'],source=root['source_id'],name=root['name'],fragment=json.dumps(value,ensure_ascii=False),signature=signature,evidence=evidence,status=status))
     for node in value['nodes'][1:]:
         if node['source_id']:
             conn.execute(text('''INSERT INTO ricedata.rice_pedigree_direct_job(source_id,priority) VALUES (:id,0)
@@ -97,10 +97,16 @@ def run(args):
             with engine.begin() as c:c.execute(text("UPDATE ricedata.rice_pedigree_direct_job SET priority=100 WHERE source_id=:id"),{'id':sid})
             print(json.dumps(dict(source_id=sid,status='direct_fragment_deferred')),flush=True)
         except SourceExpansionAmbiguity as exc:
-            # A deterministic source UI collision is not a transient request error.
+            # User-approved policy: retain maximum observed page, not a complete-tree claim.
+            state=load_json(checkpoint)
+            records,_,_=parse_source(state['html'],state['url'])
+            value=fragment(records,allow_source_limited=True)
+            if value is None:raise ValueError('Source-limited root has not been expanded')
+            (folder/'source-limited.html').write_text(state['html'],encoding='utf-8')
             with engine.begin() as c:
-                c.execute(text("UPDATE ricedata.rice_pedigree_direct_job SET error=:error,status='needs_review' WHERE source_id=:id"),dict(id=sid,error=type(exc).__name__+': '+str(exc)))
-            print(json.dumps(dict(source_id=sid,status='source_action_collision',error=str(exc)),ensure_ascii=False),flush=True)
+                store(c,value,state['url'],hashlib.sha256(state['html'].encode()).hexdigest(),status='verified_partial')
+                c.execute(text("UPDATE ricedata.rice_pedigree_direct_job SET root_key=:key,error=:error,status='source_limited',collected_at=now() WHERE source_id=:id"),dict(key=value['root'],id=sid,error=type(exc).__name__+': '+str(exc)))
+            print(json.dumps(dict(source_id=sid,status='source_limited',error=str(exc)),ensure_ascii=False),flush=True)
         except Exception as exc:
             with engine.begin() as c:c.execute(text("UPDATE ricedata.rice_pedigree_direct_job SET attempts=attempts+1,error=:error,priority=100,status=CASE WHEN attempts>=2 THEN 'needs_review' ELSE 'pending' END WHERE source_id=:id"),dict(id=sid,error=type(exc).__name__+': '+str(exc)))
             if getattr(getattr(exc,'response',None),'status_code',None) in (403,429):
