@@ -3,6 +3,11 @@ import { AlertTriangle, CheckCircle2, Download, LoaderCircle, Plus, Scale, Shiel
 import { authorizedFetch, jsonRequest, request, streamJsonLines } from "./api";
 import RiceDataVarietyDrawer from "./RiceDataVarietyDrawer";
 import { conditionValueOptions, localizeConditionText } from "./conditionValuePresentation";
+import {
+  DEFAULT_COMBINATION_BATCH_SIZE,
+  combinationWindow,
+  nextCombinationWindowSize,
+} from "./parentCombinationWindow";
 
 const MODE_LABELS = {
   conventional: "常规稻杂交",
@@ -179,6 +184,29 @@ function PairCard({ item, runId, canReview, reviewDecision, onReviewed, onNotice
   </article>{selectedParent && <RiceDataVarietyDrawer parent={selectedParent} onClose={() => setSelectedParent(null)} />}</>;
 }
 
+function CombinationCollection({ id, label, items, totalCount, open, onToggle, renderItem }) {
+  const [visibleCount, setVisibleCount] = useState(DEFAULT_COMBINATION_BATCH_SIZE);
+  const window = combinationWindow(items, visibleCount);
+
+  useEffect(() => {
+    if (!open) setVisibleCount(DEFAULT_COMBINATION_BATCH_SIZE);
+  }, [open]);
+
+  return <section className={`parent-combination-collection${open ? " open" : ""}`}>
+    <button className="parent-combination-toggle" type="button" aria-expanded={open} aria-controls={`${id}-panel`} onClick={onToggle}>
+      <span>{open ? "▾" : "▸"} {label}</span>
+      <small>已返回 {items.length}/{totalCount} 个组合</small>
+    </button>
+    {open && <div className="parent-combination-panel" id={`${id}-panel`}>
+      <div className="parent-combination-scroll">{window.visible.map(renderItem)}</div>
+      <footer>
+        <span>当前显示 {window.visible.length}/{items.length} 条{totalCount > items.length ? `，总计 ${totalCount} 条` : ""}</span>
+        <div>{window.hasMore && <button type="button" onClick={() => setVisibleCount(nextCombinationWindowSize(visibleCount, items.length))}>再显示 {Math.min(DEFAULT_COMBINATION_BATCH_SIZE, window.remaining)} 条</button>}<button type="button" onClick={onToggle}>收起列表</button></div>
+      </footer>
+    </div>}
+  </section>;
+}
+
 export default function ParentSelectionWorkspace({ onNotice }) {
   const [mode, setMode] = useState("conventional");
   const [goal, setGoal] = useState("");
@@ -200,6 +228,7 @@ export default function ParentSelectionWorkspace({ onNotice }) {
   const [result, setResult] = useState(null);
   const [reviews, setReviews] = useState({});
   const [canReview, setCanReview] = useState(null);
+  const [openCombinationGroup, setOpenCombinationGroup] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -212,6 +241,7 @@ export default function ParentSelectionWorkspace({ onNotice }) {
   function invalidateDraft() {
     setGoalDraftId(""); setDraftConfirmed(false); setConditions([]);
     setDraftSummary(""); setUnresolved([]); setAssumptions([]); setResult(null); setParseProgress([]);
+    setOpenCombinationGroup(null);
   }
 
   function changeMode(value) {
@@ -253,7 +283,7 @@ export default function ParentSelectionWorkspace({ onNotice }) {
     if (!draftConfirmed) { setError("请核对结构化条件，并勾选确认后再执行推荐。"); return; }
     if (!conditions.length) { setError("至少需要一个经确认的可执行条件。"); return; }
     if (conditions.some((item) => item.operator === "between" && (!Array.isArray(item.value) || item.value.length !== 2))) { setError("范围条件必须填写两个有效边界值。"); return; }
-    setRunning(true); setError(""); setResult(null); setReviews({});
+    setRunning(true); setError(""); setResult(null); setReviews({}); setOpenCombinationGroup(null);
     try {
       const payload = await request("/api/research/parent-selection/runs", jsonRequest("POST", {
         mode, breeding_goal: goal, goal_draft_id: goalDraftId, draft_confirmed: true,
@@ -283,6 +313,6 @@ export default function ParentSelectionWorkspace({ onNotice }) {
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 2</span><h3>核对大模型生成的条件草案</h3></header>{draftSummary && <p>{localizeConditionText(draftSummary)}</p>}{assumptions.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>需确认的理解：{assumptions.map(localizeConditionText).join("；")}</span></div>}{unresolved.length > 0 && <div className="workspace-warning"><AlertTriangle size={18} /><span>尚不能执行的目标：{unresolved.map(localizeConditionText).join("；")}。请补充阈值后重新解析，或在下方手工新增条件。</span></div>}<ConditionEditor conditions={conditions} onChange={(items) => { setConditions(items); setDraftConfirmed(false); }} /><label className="inline-check parent-draft-confirm"><input type="checkbox" checked={draftConfirmed} disabled={!conditions.length} onChange={(event) => setDraftConfirmed(event.target.checked)} />我已核对育种路线、硬门槛、排序偏好、作用对象和阈值，同意按当前条件执行。</label></section>}
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 3</span><h3>设置候选范围和亲缘检查</h3></header><div className="parameter-grid"><label>自动召回候选数量<input type="number" min="2" max={mode === "conventional" ? 120 : 80} value={candidateLimit} onChange={(event) => setCandidateLimit(event.target.value)} /></label><label>检查祖先代数<select value={kinship.depth} onChange={(event) => { setKinship({ ...kinship, depth: Number(event.target.value), exclude_through_depth: Math.min(kinship.exclude_through_depth, Number(event.target.value)) }); setDraftConfirmed(false); }}><option value={3}>三代</option><option value={5}>五代</option></select></label><label>共同祖先排除范围<select value={kinship.exclude_through_depth} onChange={(event) => { setKinship({ ...kinship, exclude_through_depth: Number(event.target.value) }); setDraftConfirmed(false); }}><option value={2}>两代内</option><option value={3}>三代内</option>{kinship.depth === 5 && <option value={5}>五代内</option>}</select></label><label className="inline-check"><input type="checkbox" checked={kinship.require_complete_pedigree} onChange={(event) => { setKinship({ ...kinship, require_complete_pedigree: event.target.checked }); setDraftConfirmed(false); }} />系谱不完整时必须进入待核实</label></div><label>必评 RiceData 品种编号（可不填）<input value={pinned} onChange={(event) => setPinned(event.target.value)} placeholder="逗号分隔；必评仍不能绕过硬门槛" /></label><label>排除 RiceData 品种编号（可不填）<input value={excluded} onChange={(event) => setExcluded(event.target.value)} placeholder="逗号分隔" /></label></section>}
     {goalDraftId && <section className="workspace-card parent-step"><header><span>步骤 4</span><h3>执行确定性分析</h3></header><div className="workspace-warning"><ShieldCheck size={18} /><span>大模型只负责理解目标；品种筛选、三代/五代近亲判定和组合评分均由可复核规则完成。候选仅来自国家水稻数据中心。</span></div>{error && <div className="workspace-error"><AlertTriangle size={17} />{error}</div>}<button className="primary-button" disabled={running || !conditions.length || !draftConfirmed} onClick={run}>{running ? <LoaderCircle className="spin" size={16} /> : <Scale size={16} />}{running ? "正在检索与计算…" : "生成亲本推荐"}</button></section>}
-    {result && <section className="workspace-card recommendation-results parent-step"><header><div><span>步骤 5</span><h3>查看结果并由育种专家确认</h3><p>{result.disclaimer}</p><p>候选 {result.candidate_count} 个，形成 {result.pair_count} 个组合；正式推荐 {result.formal_count}，待核实 {result.pending_count}，已排除 {result.excluded_count}。</p></div><div className="download-actions"><button onClick={() => download(`/api/research/parent-selection/runs/${result.run_id}/report.pdf`, "亲本推荐报告.pdf").catch((error) => onNotice?.(error.message))}><Download size={15} />PDF</button><button onClick={() => download(`/api/research/parent-selection/runs/${result.run_id}/result.csv`, "亲本推荐结果.csv").catch((error) => onNotice?.(error.message))}><Download size={15} />CSV</button></div></header>{result.selection_warning && <div className="workspace-warning"><AlertTriangle size={18} />{result.selection_warning}</div>}<h3>优先推荐</h3>{result.recommendations.length ? result.recommendations.map((item) => { const key = `${item.female_parent.variety_id}-${item.male_parent.variety_id}`; return <PairCard key={key} item={item} runId={result.run_id} canReview={canReview} reviewDecision={reviews[key]} onNotice={onNotice} onReviewed={(reviewKey, value) => setReviews((current) => ({ ...current, [reviewKey]: value }))} />; }) : <p className="intelligence-empty">当前没有进入正式等级的组合。</p>}<details><summary>待核实组合（展示 {result.pending_verification.length}/{result.pending_count}）</summary>{result.pending_verification.map((item) => { const key = `${item.female_parent.variety_id}-${item.male_parent.variety_id}`; return <PairCard key={`pending-${key}`} item={item} runId={result.run_id} canReview={canReview} reviewDecision={reviews[key]} onNotice={onNotice} onReviewed={(reviewKey, value) => setReviews((current) => ({ ...current, [reviewKey]: value }))} />; })}</details><details><summary>已排除组合（展示 {result.excluded_combinations.length}/{result.excluded_count}）</summary>{result.excluded_combinations.map((item) => <PairCard key={`excluded-${item.female_parent.variety_id}-${item.male_parent.variety_id}`} item={item} runId={result.run_id} canReview={canReview} onNotice={onNotice} onReviewed={() => {}} />)}</details>{Object.keys(reviews).length > 0 && <div className="workspace-warning"><CheckCircle2 size={18} />已记录 {Object.keys(reviews).length} 个专家审核决定。</div>}</section>}
+    {result && <section className="workspace-card recommendation-results parent-step"><header><div><span>步骤 5</span><h3>查看结果并由育种专家确认</h3><p>{result.disclaimer}</p><p>候选 {result.candidate_count} 个，形成 {result.pair_count} 个组合；正式推荐 {result.formal_count}，待核实 {result.pending_count}，已排除 {result.excluded_count}。</p></div><div className="download-actions"><button onClick={() => download(`/api/research/parent-selection/runs/${result.run_id}/report.pdf`, "亲本推荐报告.pdf").catch((error) => onNotice?.(error.message))}><Download size={15} />PDF</button><button onClick={() => download(`/api/research/parent-selection/runs/${result.run_id}/result.csv`, "亲本推荐结果.csv").catch((error) => onNotice?.(error.message))}><Download size={15} />CSV</button></div></header>{result.selection_warning && <div className="workspace-warning"><AlertTriangle size={18} />{result.selection_warning}</div>}<h3>优先推荐</h3>{result.recommendations.length ? result.recommendations.map((item) => { const key = `${item.female_parent.variety_id}-${item.male_parent.variety_id}`; return <PairCard key={key} item={item} runId={result.run_id} canReview={canReview} reviewDecision={reviews[key]} onNotice={onNotice} onReviewed={(reviewKey, value) => setReviews((current) => ({ ...current, [reviewKey]: value }))} />; }) : <p className="intelligence-empty">当前没有进入正式等级的组合。</p>}<CombinationCollection id="pending-combinations" label="待核实组合" items={result.pending_verification} totalCount={result.pending_count} open={openCombinationGroup === "pending"} onToggle={() => setOpenCombinationGroup((current) => current === "pending" ? null : "pending")} renderItem={(item) => { const key = `${item.female_parent.variety_id}-${item.male_parent.variety_id}`; return <PairCard key={`pending-${key}`} item={item} runId={result.run_id} canReview={canReview} reviewDecision={reviews[key]} onNotice={onNotice} onReviewed={(reviewKey, value) => setReviews((current) => ({ ...current, [reviewKey]: value }))} />; }} /><CombinationCollection id="excluded-combinations" label="已排除组合" items={result.excluded_combinations} totalCount={result.excluded_count} open={openCombinationGroup === "excluded"} onToggle={() => setOpenCombinationGroup((current) => current === "excluded" ? null : "excluded")} renderItem={(item) => <PairCard key={`excluded-${item.female_parent.variety_id}-${item.male_parent.variety_id}`} item={item} runId={result.run_id} canReview={canReview} onNotice={onNotice} onReviewed={() => {}} />} />{Object.keys(reviews).length > 0 && <div className="workspace-warning"><CheckCircle2 size={18} />已记录 {Object.keys(reviews).length} 个专家审核决定。</div>}</section>}
   </div>;
 }

@@ -522,6 +522,19 @@ body:has(.research-shell), body:has(.assistant-loading), body:has(.auth-error) {
 .parent-review-actions button.selected { border-color: #24745e; color: #fff; background: #24745e; }
 .parent-review-actions em { color: #8a6b2f; font-style: normal; }
 .parent-review-actions strong { color: #216a55; }
+.parent-combination-collection { margin-top: 10px; border: 1px solid #d7e4de; border-radius: 7px; overflow: hidden; background: #fbfdfc; }
+.parent-combination-collection.open { border-color: #abcbbc; box-shadow: 0 8px 24px rgba(31, 91, 72, .08); }
+.parent-combination-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 14px; border: 0; padding: 11px 13px; color: #315f50; background: #f6faf8; cursor: pointer; text-align: left; }
+.parent-combination-toggle span { font-weight: 700; }
+.parent-combination-toggle small { color: #71877f; }
+.parent-combination-collection.open .parent-combination-toggle { border-bottom: 1px solid #d7e4de; background: #edf7f2; }
+.parent-combination-panel { padding: 10px; }
+.parent-combination-scroll { max-height: min(68vh, 720px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 5px; }
+.parent-combination-scroll .parent-pair-card:first-child { margin-top: 0; }
+.parent-combination-panel > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid #d9e6e0; padding: 10px 2px 0; color: #668077; font-size: 12px; }
+.parent-combination-panel > footer > div { display: flex; gap: 8px; }
+.parent-combination-panel > footer button { border: 1px solid #b9d3c7; border-radius: 5px; padding: 7px 10px; color: #276b58; background: #fff; cursor: pointer; }
+@media (max-width: 760px) { .parent-combination-toggle, .parent-combination-panel > footer { align-items: flex-start; flex-direction: column; }.parent-combination-scroll { max-height: 65vh; } }
 .pair-qualification { margin: 14px 0; border-left: 3px solid #2d876d; padding: 10px 12px; color: #385f52; background: #f2f8f5; font-size: 12px; }
 .pair-qualification > strong { color: #185b48; font-size: 13px; }.pair-qualification b { display: block; margin-top: 9px; color: #517266; }
 .pair-qualification ul { margin: 6px 0 0; padding-left: 18px; }.pair-qualification li { margin: 3px 0; line-height: 1.55; }
