@@ -210,9 +210,10 @@ class RiceDataParentRepository:
                 params[f"recall_trait_{index}"] = condition.field
                 score_terms.append(f"""CASE WHEN EXISTS (
                     SELECT 1 FROM (
-                      SELECT s.variety_id,COALESCE(m.value_numeric,m.value_min,m.value_max) AS candidate_value
+                      SELECT ta.variety_id,COALESCE(m.value_numeric,m.value_min,m.value_max) AS candidate_value
                       FROM agent_query.ricedata__rice_variety_trait_measurement m
                       JOIN agent_query.ricedata__rice_variety_trait_summary s ON s.trait_summary_id=m.trait_summary_id
+                      JOIN agent_query.ricedata__rice_variety_approval ta ON ta.approval_id=s.approval_id
                       WHERE m.trait_code=:recall_trait_{index}
                       UNION ALL
                       SELECT n.variety_id,COALESCE(n.value_numeric,n.value_min,n.value_max) AS candidate_value
@@ -250,14 +251,14 @@ class RiceDataParentRepository:
             ORDER BY variety_id,approval_year DESC NULLS LAST,approval_id
         """, params)
         measurements = _rows(self.session, """
-            SELECT s.variety_id,s.approval_id,m.trait_code,m.value_numeric,m.value_min,m.value_max,
+            SELECT a.variety_id,s.approval_id,m.trait_code,m.value_numeric,m.value_min,m.value_max,
                    m.value_text,m.unit,m.observation_year,m.observation_region,m.trait_measurement_id,
                    a.approval_region,v.source_url
             FROM agent_query.ricedata__rice_variety_trait_measurement m
             JOIN agent_query.ricedata__rice_variety_trait_summary s ON s.trait_summary_id=m.trait_summary_id
             JOIN agent_query.ricedata__rice_variety_approval a ON a.approval_id=s.approval_id
             JOIN agent_query.ricedata__rice_variety v ON v.variety_id=s.variety_id
-            WHERE s.variety_id=ANY(:ids)
+            WHERE a.variety_id=ANY(:ids)
         """, params)
         narratives = _rows(self.session, """
             SELECT n.variety_id,n.approval_id,n.trait_code,n.value_numeric,n.value_min,n.value_max,

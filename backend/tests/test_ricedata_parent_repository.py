@@ -1,10 +1,17 @@
+import inspect
 import unittest
 
 from app.parent_recommendation_engine import ParentRole
-from app.ricedata_parent_repository import _ancestor_profiles, classify_roles, variety_attributes
+from app.ricedata_parent_repository import RiceDataParentRepository, _ancestor_profiles, classify_roles, variety_attributes
 
 
 class RiceDataParentRepositoryTests(unittest.TestCase):
+    def test_trait_summary_is_joined_to_approval_for_variety_identity(self):
+        source = inspect.getsource(RiceDataParentRepository)
+        self.assertNotIn("s.variety_id", source)
+        self.assertIn("ta.variety_id", source)
+        self.assertIn("a.variety_id", source)
+
     def test_role_classification_keeps_unknown_sterile_line_out_of_a_specific_system(self):
         self.assertEqual(classify_roles("籼型三系不育系", "甲A"), frozenset({ParentRole.STERILE_THREE_LINE}))
         self.assertEqual(classify_roles("籼型两系不育系", "乙S"), frozenset({ParentRole.STERILE_TWO_LINE}))
