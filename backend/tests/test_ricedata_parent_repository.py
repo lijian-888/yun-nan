@@ -13,6 +13,11 @@ class RiceDataParentRepositoryTests(unittest.TestCase):
         self.assertIn("ta.variety_id", source)
         self.assertIn("v.variety_id=a.variety_id", source)
 
+    def test_five_trait_evaluation_uses_the_restricted_read_model(self):
+        source = inspect.getsource(RiceDataParentRepository)
+        self.assertIn("agent_query.ricedata__five_trait_comprehensive_evaluation", source)
+        self.assertNotIn("FROM ai.ricedata_five_trait_comprehensive_evaluation", source)
+
     def test_candidate_recall_uses_single_aggregate_fact_scan(self):
         class EmptyResult:
             def mappings(self): return self

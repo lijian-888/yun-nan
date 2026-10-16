@@ -1,7 +1,7 @@
 """PostgreSQL adapter for the deterministic parent recommendation module.
 
 Only ``agent_query.ricedata__*`` read models are queried.  Institute material
-tables are deliberately absent from this adapter.
+tables and internal analysis schemas are deliberately absent from this adapter.
 """
 
 from __future__ import annotations
@@ -315,7 +315,7 @@ class RiceDataParentRepository:
             SELECT variety_id,yield_score,stability_score,disease_score,stress_score,quality_score,
                    comprehensive_score,comprehensive_rank,scored_dimension_count,missing_dimensions,
                    evaluation_status,evaluation_profile_id,evidence_summary,interpretation_boundary
-            FROM ai.ricedata_five_trait_comprehensive_evaluation
+            FROM agent_query.ricedata__five_trait_comprehensive_evaluation
             WHERE variety_id=ANY(:ids)
         """, params)
         snapshots = _rows(self.session, """
